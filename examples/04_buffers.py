@@ -5,25 +5,23 @@ Run with:  python examples/04_buffers.py
 import math
 import struct
 
-from openal_py import AudioFormat, Buffer, Context, Device
+from openal_py import AudioFormat, Device
 
 
 def main() -> None:
-    device = Device.default()
-    ctx = Context(device)
-    with ctx:
+    with Device.open() as device, device.create_context() as ctx, ctx.activate():
         # --- raw PCM -----------------------------------------------------
         # 100 ms of 440 Hz sine, mono 16-bit @ 44.1 kHz
         rate = 44100
         n = rate // 10
         samples = struct.pack(f"<{n}h", *[int(12000 * math.sin(2 * math.pi * 440 * i / rate)) for i in range(n)])
-        buf = Buffer.from_pcm(ctx, samples, AudioFormat.MONO16, rate)
-        print("PCM buffer:  freq=%d ch=%d size=%d bytes" % (buf.frequency, buf.channels, buf.size))
+        buf = ctx.buffer_from_pcm(samples, format=AudioFormat.MONO16, sample_rate=rate)
+        print("PCM buffer:  freq=%d ch=%d size=%d bytes" % (buf.sample_rate, buf.channels, buf.size))
 
         # --- stereo -------------------------------------------------------
-        stereo = Buffer.from_pcm(ctx, b"\x00" * (2 * n), AudioFormat.STEREO16, rate)
+        stereo = ctx.buffer_from_pcm(b"\x00" * (4 * n), format=AudioFormat.STEREO16, sample_rate=rate)
         print("stereo:      ch=%d" % stereo.channels)
-        stereo.delete()
+        stereo.close()
 
         # --- WAV file -----------------------------------------------------
         # (write a tiny WAV first in real usage)
@@ -35,8 +33,8 @@ def main() -> None:
             w.setsampwidth(2)
             w.setframerate(rate)
             w.writeframes(b"\x00\x00" * 4410)
-        wav_buf = Buffer.from_wav(ctx, wav_path)
-        print("WAV buffer:  freq=%d ch=%d size=%d" % (wav_buf.frequency, wav_buf.channels, wav_buf.size))
+        wav_buf = ctx.load(wav_path)
+        print("WAV buffer:  freq=%d ch=%d size=%d" % (wav_buf.sample_rate, wav_buf.channels, wav_buf.size))
         os.unlink(wav_path)
 
         # --- any format via optional soundfile (pip install soundfile) ------
@@ -45,8 +43,8 @@ def main() -> None:
             with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as f:
                 ogg_path = f.name
             soundfile.write(ogg_path, numpy.zeros(n, dtype="float64"), rate, format="OGG")
-            ogg_buf = Buffer.from_file(ctx, ogg_path)
-            print("OGG buffer:  freq=%d ch=%d (via soundfile)" % (ogg_buf.frequency, ogg_buf.channels))
+            ogg_buf = ctx.load(ogg_path)
+            print("OGG buffer:  freq=%d ch=%d (via soundfile)" % (ogg_buf.sample_rate, ogg_buf.channels))
             os.unlink(ogg_path)
         except ImportError:
             print("OGG buffer:  (soundfile not installed; pip install soundfile)")
@@ -57,9 +55,9 @@ def main() -> None:
         import time
         time.sleep(0.15)
         src.stop()
-        src.delete()      # unbinds the buffer before it is deleted
-        buf.delete()
-        wav_buf.delete()
+        src.close()      # unbinds the buffer before it is deleted
+        buf.close()
+        wav_buf.close()
 
 
 if __name__ == "__main__":

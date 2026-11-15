@@ -18,12 +18,12 @@ def test_device_spec_is_string(device):
 
 def test_device_extensions_are_strings(device):
     exts = device.extensions
-    assert isinstance(exts, list)
+    assert isinstance(exts, frozenset)
     assert all(isinstance(e, str) for e in exts)
     # System implementations may expose fewer extensions than the bundle.
     for ext in exts:
-        assert device.is_alc_extension_present(ext)
-    assert not device.is_alc_extension_present("ALC_NO_SUCH_EXTENSION")
+        assert device.supports(ext)
+    assert not device.supports("ALC_NO_SUCH_EXTENSION")
 
 
 def test_device_attributes(device):
@@ -71,9 +71,9 @@ def test_double_open_is_independent():
 
 # -- context ------------------------------------------------------------------
 
-def test_context_not_current_by_default(ctx):
-    # ctx fixture enters the context; check the raw state before/after
-    pass  # covered below
+def test_context_not_current_by_default(device):
+    with device.create_context() as context:
+        assert not context.is_current
 
 
 def test_make_current_returns_previous(ctx):
@@ -88,7 +88,7 @@ def test_multiple_contexts_switch(device):
     c2 = Context(device)
     assert c1.handle != c2.handle
 
-    with c1:
+    with c1.activate():
         assert c1.is_current
         prev = c2.make_current()
         assert not c1.is_current
@@ -102,14 +102,14 @@ def test_multiple_contexts_switch(device):
 
 
 def test_context_manager_clears_on_exit(device):
-    with Context(device):
+    with Context(device) as context, context.activate():
         assert get_current_context() != 0
     assert get_current_context() == 0
 
 
 def test_context_manager_clears_on_exception(device):
     with pytest.raises(RuntimeError):
-        with Context(device):
+        with Context(device) as context, context.activate():
             raise RuntimeError("boom")
     assert get_current_context() == 0
 
@@ -145,11 +145,11 @@ def test_nested_context_restores_outer(ctx, device, same_context, raises):
     try:
         if raises:
             with pytest.raises(ValueError):
-                with inner:
+                with inner.activate():
                     assert inner.is_current
                     raise ValueError("test")
         else:
-            with inner:
+            with inner.activate():
                 assert inner.is_current
         assert ctx.is_current
     finally:

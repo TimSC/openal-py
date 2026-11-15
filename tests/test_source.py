@@ -139,4 +139,4 @@ def test_source_repr(ctx, buf):
     r = repr(src)
     assert "Source" in r
     src.delete()
-    assert "deleted" in repr(src)
+    assert "closed=True" in repr(src)

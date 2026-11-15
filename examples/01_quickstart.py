@@ -5,7 +5,7 @@ Run with:  python examples/01_quickstart.py
 import math
 import struct
 
-from openal_py import AudioFormat, Buffer, Context, Device
+from openal_py import AudioFormat, Device
 
 
 def make_sine(freq: float, sample_rate: int, seconds: float) -> bytes:
@@ -15,12 +15,9 @@ def make_sine(freq: float, sample_rate: int, seconds: float) -> bytes:
 
 
 def main() -> None:
-    device = Device.default()
-    print("device:", device.spec)
-
-    ctx = Context(device)
-    with ctx:  # makes the context current for the duration of the block
-        tone = Buffer.from_pcm(ctx, make_sine(440.0, 44100, 0.5), AudioFormat.MONO16, 44100)
+    with Device.open() as device, device.create_context() as ctx, ctx.activate():
+        print("device:", device.spec)
+        tone = ctx.buffer_from_pcm(make_sine(440.0, 44100, 0.5), format=AudioFormat.MONO16, sample_rate=44100)
         src = ctx.create_source(buffer=tone, gain=0.5)
         src.play()
         print("playing 440 Hz for 0.5 s ...")

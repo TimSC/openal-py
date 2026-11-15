@@ -17,5 +17,5 @@ def device():
 @pytest.fixture
 def ctx(device):
     context = Context(device)
-    with context:
+    with context, context.activate():
         yield context

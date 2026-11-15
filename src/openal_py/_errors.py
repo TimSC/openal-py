@@ -13,7 +13,7 @@ class OpenALError(Exception):
     api = "AL"
     _names = _AL_NAMES
 
-    def __init__(self, code: int):
+    def __init__(self, code: int) -> None:
         self.code = int(code)
         name = self._names.get(self.code)
         msg = f"{self.api} error {self.code:#x}"
@@ -31,3 +31,23 @@ class ALCError(OpenALError):
 
     api = "ALC"
     _names = _ALC_NAMES
+
+
+class LifecycleError(RuntimeError):
+    """Invalid use of an OpenAL resource's lifetime or activation state."""
+
+
+class ResourceClosedError(LifecycleError):
+    """An operation requires a live resource."""
+
+
+class ContextNotCurrentError(LifecycleError):
+    """An operation requires the owning context to be current."""
+
+
+class ResourceInUseError(LifecycleError):
+    """A resource cannot close while dependent resources remain live."""
+
+
+class ContextMismatchError(ValueError):
+    """Resources belong to different contexts."""

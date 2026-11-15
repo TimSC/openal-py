@@ -1,47 +1,41 @@
-"""Lifecycle: context managers, explicit delete, and garbage collection.
-
-Run with:  python examples/06_lifecycle.py
-"""
+"""Resource blocks close objects; activation blocks select contexts."""
 import gc
+import weakref
 
-from openal_py import AudioFormat, Buffer, Context, Device
+from openal_py import AudioFormat, Device
 
 
 def main() -> None:
-    device = Device.default()
+    with Device.open() as device:
+        with device.create_context() as ctx:
+            print("resource block does not activate:", ctx.is_current)
+            with ctx.activate():
+                print("current:", ctx.is_current)
+                with device.create_context() as other:
+                    with other.activate():
+                        print("inner current:", other.is_current)
+                    print("outer restored:", ctx.is_current)
+                with ctx.buffer_from_pcm(b"\0" * 100, format=AudioFormat.MONO8,
+                                         sample_rate=8000) as buffer:
+                    with ctx.create_source(buffer=buffer) as source:
+                        print("live resources:", source, buffer)
+                    print("source closed:", source.closed)
+                print("buffer closed:", buffer.closed)
 
-    # --- context manager makes current / clears on exit -------------------
-    ctx = Context(device)
-    print("current on entry? ", end="")
-    with ctx:
-        print(ctx.is_current)
-    print("current on exit?  ", ctx.is_current)
-
-    # --- explicit delete ----------------------------------------------------
-    with ctx:
-        buf = Buffer.from_pcm(ctx, b"\x00" * 100, AudioFormat.MONO8, 8000)
-        src = ctx.create_source(buffer=buf)
-        print("before delete: src.handle =", src.handle)
-        src.delete()
-        print("after delete:  src.handle =", src.handle, "| repr:", repr(src))
-        buf.delete()
-
-    # --- garbage collection --------------------------------------------------
-    # When a wrapper is dropped, its C handle is released automatically
-    # (even if the context is already gone -- no crashes, no leaks).
-    with ctx:
-        src2 = ctx.create_source()
-        buf2 = Buffer.from_pcm(ctx, b"\x00" * 100, AudioFormat.MONO8, 8000)
-        src2.buffer = buf2
-        h_src, h_buf = src2.handle, buf2.handle
-        del src2, buf2
-        gc.collect()
-        from openal_py import _core
-        print("GC released source?", not _core.is_source(h_src))
-        print("GC released buffer?", not _core.is_buffer(h_buf))
-
-    ctx.destroy()
-    device.close()
+                # The source retains its buffer even without a caller reference.
+                buffer = ctx.buffer_from_pcm(b"\0" * 100, format=AudioFormat.MONO8,
+                                             sample_rate=8000)
+                reference = weakref.ref(buffer)
+                source = ctx.create_source(buffer=buffer)
+                del buffer
+                gc.collect()
+                print("attached buffer retained:", reference() is source.buffer)
+                source.close()
+                gc.collect()
+                print("buffer collected:", reference() is None)
+            print("activation ended; context still open:", not ctx.closed)
+        print("context closed:", ctx.closed)
+    print("device closed:", device.closed)
 
 
 if __name__ == "__main__":

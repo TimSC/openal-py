@@ -120,3 +120,20 @@ def test_unsigned_eight_bit_conversion(ctx, tmp_path, monkeypatch, channels, for
     assert uploaded == [expected.tobytes()]
     assert buffer.channels == channels
     assert buffer.size == 5 * channels
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_stereo_inference_and_file_objects(ctx, tmp_path, stream):
+    import io
+    import numpy as np
+    samples = np.zeros((80, 2), dtype="int16")
+    file = io.BytesIO() if stream else tmp_path / "stereo.flac"
+    sf.write(file, samples, 8000, format="FLAC")
+    if stream:
+        file.seek(0)
+    buffer = ctx.load(file)
+    assert buffer.format is AudioFormat.STEREO16
+    assert buffer.frame_count == 80
+    assert buffer.sample_rate == 8000
+    if stream:
+        assert not file.closed

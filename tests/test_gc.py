@@ -28,11 +28,11 @@ def test_objects_gc_after_context_destroy():
     # Objects outliving their context must not raise in their finalizers.
     dev = Device.default()
     ctx = Context(dev)
-    with ctx:
+    with ctx.activate():
         src = ctx.create_source()
         buf = Buffer.from_pcm(ctx, b"\x00" * 100, AudioFormat.MONO8, 8000)
         src.buffer = buf
-    # ctx (and its device) about to die
+    ctx.close()
     del ctx
     dev.close()
     del src, buf
@@ -42,7 +42,7 @@ def test_objects_gc_after_context_destroy():
 def test_explicit_delete_then_gc():
     dev = Device.default()
     ctx = Context(dev)
-    with ctx:
+    with ctx.activate():
         src = ctx.create_source()
         src.delete()
         h = src.handle
@@ -87,7 +87,7 @@ def test_cleanup_uses_owning_context(ctx, device, explicit, factory, is_live):
     handle = owned.handle
     other = Context(device)
     try:
-        with other:
+        with other.activate():
             survivor = factory(other)
             if explicit:
                 owned.delete()
@@ -122,7 +122,7 @@ def test_current_context_gc_clears_current(device):
 
 def test_cleanup_after_context_destroy_preserves_other_context(ctx, device):
     other = Context(device)
-    with other:
+    with other.activate():
         source = other.create_source()
     other.destroy()
     survivor = ctx.create_source()

@@ -251,8 +251,8 @@ def open_device(name: str | None = None) -> int:
 
 
 def close_device(device) -> None:
-    _al_api.alcCloseDevice(_dev(device))
-    _check_alc(None)
+    if not _al_api.alcCloseDevice(_dev(device)):
+        raise ALCError(0xA001)  # ALC_INVALID_DEVICE
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +352,8 @@ cdef inline bint _all_ints(object v):
 
 
 def listener_set(pname, value) -> None:
+    if not isinstance(value, (int, float, bool)):
+        value = tuple(value)
     _vector_length(pname, value, 6 if pname == 0x100F else (3 if pname in (0x1004, 0x1006) else 1))
     cdef ALenum p = <ALenum> pname
     cdef ALfloat buf6[6]
@@ -445,8 +447,15 @@ def source_stop(source) -> None:
     _check_al()
 
 
+def source_rewind(source) -> None:
+    _al_api.alSourceRewind(<ALuint> source)
+    _check_al()
+
+
 def source_set(source, pname, value) -> None:
     """Set a source parameter: scalar float/int, or 1/3-tuple."""
+    if not isinstance(value, (int, float, bool)):
+        value = tuple(value)
     _vector_length(pname, value, 3 if pname in (0x1004, 0x1005, 0x1006, 0x20006) else 1)
     cdef ALuint s = <ALuint> source
     cdef ALenum p = <ALenum> pname

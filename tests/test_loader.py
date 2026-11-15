@@ -117,7 +117,7 @@ from openal_py import Device, Context, library_path
 assert library_path() == "libopenal.so.1", library_path()
 with Device.default() as device:
     context = Context(device)
-    with context:
+    with context.activate():
         source = context.create_source()
         source.play()
         source.delete()

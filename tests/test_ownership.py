@@ -13,7 +13,7 @@ def test_operations_require_owning_context(ctx, device):
     listener = Listener()
     other = Context(device)
     try:
-        with other:
+        with other.activate():
             survivor = other.create_source(gain=0.4)
             operations = [source.play, source.pause, source.stop,
                           lambda: source.state, lambda: source.gain,
@@ -37,7 +37,7 @@ def test_incompatible_and_deleted_buffers_rejected(ctx, device):
     source = ctx.create_source()
     other = Context(device)
     try:
-        with other:
+        with other.activate():
             foreign = other.create_buffer()
         with pytest.raises(ValueError, match="different context"):
             source.buffer = foreign

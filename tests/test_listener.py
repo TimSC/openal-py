@@ -66,6 +66,6 @@ def test_listener_is_global_state(ctx, device):
     L1.gain = 1.0
     from openal_py import Context
     c2 = Context(device)
-    with c2:
+    with c2.activate():
         assert Listener().gain == pytest.approx(1.0)
     c2.destroy()

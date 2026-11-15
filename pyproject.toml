@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Modern Python bindings for OpenAL-soft, with the C library bundled"
 readme = "README.md"
 requires-python = ">=3.9"
+dependencies = ["typing_extensions>=4.6; python_version < '3.12'"]
 license = { text = "LGPL-2.1-or-later" }
 authors = [{ name = "openal-py contributors" }]
 classifiers = [
@@ -19,6 +20,11 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "mypy"]
 # File loading for WAV/FLAC/OGG/MP3 and friends (Buffer.from_file)
 soundfile = ["soundfile"]
+
+[tool.mypy]
+files = ["src/openal_py", "examples"]
+strict = true
+ignore_missing_imports = true

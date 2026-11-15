@@ -108,7 +108,7 @@ def test_buffer_repr(ctx):
     r = repr(buf)
     assert "Buffer" in r
     buf.delete()
-    assert "deleted" in repr(buf)
+    assert "closed=True" in repr(buf)
 
 
 @pytest.mark.parametrize("width", [3, 4])

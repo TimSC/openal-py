@@ -5,13 +5,11 @@ context and require it to be current.
 
 Run with:  python examples/03_listeners.py
 """
-from openal_py import Context, Device, Listener
+from openal_py import Device, Listener
 
 
 def main() -> None:
-    device = Device.default()
-    ctx = Context(device)
-    with ctx:
+    with Device.open() as device, device.create_context() as ctx, ctx.activate():
         L = ctx.listener
 
         # Where the head is, and which way it faces

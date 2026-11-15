@@ -4,9 +4,10 @@ from __future__ import annotations
 import ctypes.util
 import os
 import sys
+from typing import Callable
 
 
-def system_libraries():
+def system_libraries() -> list[str]:
     """Platform loader names, with the system's discovered library first."""
     if sys.platform == "win32":
         names = ["OpenAL32.dll", "openal.dll"]
@@ -18,7 +19,7 @@ def system_libraries():
     return list(dict.fromkeys(([discovered] if discovered else []) + names))
 
 
-def initialize(bundled_path, load):
+def initialize(bundled_path: str | bytes, load: Callable[[str, bool], bool]) -> None:
     """Prefer a bundle with playback devices, then system OpenAL.
 
     An explicit override is authoritative. If neither implementation detects
