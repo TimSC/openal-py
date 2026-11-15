@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import operator
-from typing import TYPE_CHECKING, Iterator, Mapping
+from typing import TYPE_CHECKING, Iterator, Mapping, Iterable, cast
 import weakref
 
 from openal_py import _core, _finalize
-from openal_py._constants import ALC
+from openal_py._constants import AL, ALC
+from openal_py._parameters import DistanceModel, NumericKind, Parameter, ParameterValue, resolve
 from openal_py._errors import ContextNotCurrentError, LifecycleError, ResourceClosedError
 from openal_py._types import AudioFile, PCMData, Vector3
 
@@ -15,6 +16,8 @@ if TYPE_CHECKING:
     from openal_py.buffer import AudioFormat, Buffer
     from openal_py.device import Device
     from openal_py.listener import Listener
+    from openal_py.group import SourceGroup
+    from openal_py.effects import Effect, EffectType, Filter, FilterType, AuxiliaryEffectSlot
     from openal_py.source import Source
 
 _contexts: weakref.WeakValueDictionary[int, Context] = weakref.WeakValueDictionary()
@@ -150,6 +153,8 @@ class Context:
         direction: Vector3 = (0.0, 0.0, 0.0), looping: bool = False,
         relative: bool = False, reference_distance: float = 1.0,
         max_distance: float = 3.4028234663852886e38, rolloff_factor: float = 1.0,
+        min_gain: float = 0.0, max_gain: float = 1.0, cone_inner_angle: float = 360.0,
+        cone_outer_angle: float = 360.0, cone_outer_gain: float = 0.0,
     ) -> Source:
         """Create a voice with explicit, discoverable playback parameters."""
         from openal_py.source import Source
@@ -167,6 +172,11 @@ class Context:
             source.reference_distance = reference_distance
             source.max_distance = max_distance
             source.rolloff_factor = rolloff_factor
+            source.min_gain = min_gain
+            source.max_gain = max_gain
+            source.cone_inner_angle = cone_inner_angle
+            source.cone_outer_angle = cone_outer_angle
+            source.cone_outer_gain = cone_outer_gain
         except Exception:
             source.close()
             raise
@@ -206,6 +216,119 @@ class Context:
     def get_buffer(self, handle: int) -> Buffer | None:
         buffer = self._buffers.get(handle)
         return buffer if buffer is not None and not buffer.closed else None
+
+    def group(self, sources: Iterable[Source]) -> SourceGroup:
+        from openal_py.group import SourceGroup
+        self._require_open()
+        return SourceGroup(self, sources)
+
+    def create_effect(self, type: EffectType | None = None, **parameters: ParameterValue) -> Effect:
+        from openal_py.effects import Effect, EffectType
+        return Effect(self, EffectType.REVERB if type is None else type, **parameters)
+
+    def create_filter(self, type: FilterType | None = None, **parameters: ParameterValue) -> Filter:
+        from openal_py.effects import Filter, FilterType
+        return Filter(self, FilterType.LOWPASS if type is None else type, **parameters)
+
+    def create_effect_slot(self, *, effect: Effect | None = None,
+                           gain: float = 1.0, auto_send: bool = True) -> AuxiliaryEffectSlot:
+        from openal_py.effects import AuxiliaryEffectSlot
+        return AuxiliaryEffectSlot(self, effect=effect, gain=gain, auto_send=auto_send)
+
+    def get_parameter(self, parameter: Parameter, *, kind: NumericKind = 'float') -> float | int | bool:
+        self._require_current()
+        return cast(float | int | bool, _core.global_parameter(resolve(AL, parameter), kind))
+
+    def enum_value(self, name: str) -> int:
+        self._require_current()
+        return _core.enum_value(name)
+
+    def function_address(self, name: str) -> int | None:
+        """Advanced FFI escape hatch; the caller must supply the native signature."""
+        self._require_current()
+        return _core.function_address(name)
+
+    def enable(self, capability: Parameter) -> None:
+        self._require_current()
+        _core.capability(resolve(AL, capability), True)
+
+    def disable(self, capability: Parameter) -> None:
+        self._require_current()
+        _core.capability(resolve(AL, capability), False)
+
+    def is_enabled(self, capability: Parameter) -> bool:
+        self._require_current()
+        return bool(_core.capability(resolve(AL, capability)))
+
+    @contextmanager
+    def deferred_updates(self) -> Iterator[Context]:
+        self._require_current()
+        if not self.supports('AL_SOFT_deferred_updates'):
+            raise NotImplementedError('AL_SOFT_deferred_updates is unavailable')
+        was_deferred = bool(self.get_parameter(AL.AL_DEFERRED_UPDATES_SOFT, kind='bool'))
+        if not was_deferred:
+            _core.defer_updates(True)
+        try:
+            yield self
+        finally:
+            if not was_deferred and not self.closed:
+                with self.activate():
+                    _core.defer_updates(False)
+
+    @property
+    def vendor(self) -> str:
+        self._require_current()
+        return _core.get_string(AL.AL_VENDOR) or ''
+
+    @property
+    def renderer(self) -> str:
+        self._require_current()
+        return _core.get_string(AL.AL_RENDERER) or ''
+
+    @property
+    def version(self) -> str:
+        self._require_current()
+        return _core.get_string(AL.AL_VERSION) or ''
+
+    @property
+    def distance_model(self) -> DistanceModel:
+        self._require_current()
+        return DistanceModel(_core.get_int(AL.AL_DISTANCE_MODEL))
+
+    @distance_model.setter
+    def distance_model(self, value: DistanceModel) -> None:
+        self._require_current()
+        _core.distance_model(int(value))
+
+    @property
+    def doppler_factor(self) -> float:
+        self._require_current()
+        return _core.get_float(AL.AL_DOPPLER_FACTOR)
+
+    @doppler_factor.setter
+    def doppler_factor(self, value: float) -> None:
+        self._require_current()
+        _core.doppler_factor(float(value))
+
+    @property
+    def doppler_velocity(self) -> float:
+        self._require_current()
+        return _core.get_float(AL.AL_DOPPLER_VELOCITY)
+
+    @doppler_velocity.setter
+    def doppler_velocity(self, value: float) -> None:
+        self._require_current()
+        _core.doppler_velocity(float(value))
+
+    @property
+    def speed_of_sound(self) -> float:
+        self._require_current()
+        return _core.get_float(AL.AL_SPEED_OF_SOUND)
+
+    @speed_of_sound.setter
+    def speed_of_sound(self, value: float) -> None:
+        self._require_current()
+        _core.speed_of_sound(float(value))
 
     def __enter__(self) -> Context:
         self._require_open()

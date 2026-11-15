@@ -121,6 +121,9 @@ Runnable examples live in `examples/` (also shipped inside the wheel at
 | `05_sources.py` | parameters, state machine, simultaneous voices |
 | `06_lifecycle.py` | resource lifetime, activation, retained buffers, GC |
 | `07_streaming.py` | queued PCM chunks and processed-buffer reclamation |
+| `08_offline_rendering.py` | synchronized voices rendered to WAV without audio hardware |
+| `09_effects.py` | reverb, filters, effect sends and named parameters |
+| `10_capture.py` | microphone discovery; recording requires explicit `--record` |
 
 ```sh
 python examples/01_quickstart.py
@@ -150,11 +153,82 @@ count; loading never silently downmixes. `Buffer.from_wav()` and `Buffer.from_fi
 remain available when a particular decoder is needed. `from_wav()` rejects sample
 widths other than 8/16-bit; soundfile supports its own broader decoder capabilities.
 
+## Remaining core controls and extensions
+
+The core playback/capture functionality of OpenAL 1.1 is available through managed
+objects. Equivalent scalar/vector C variants are consolidated into Python numeric
+values and tuples; see the [coverage matrix](docs/API_COVERAGE.md) for scope and
+remaining vendor-extension gaps.
+
+Inside `ctx.activate()`, configure `ctx.distance_model` (`DistanceModel`),
+`ctx.doppler_factor`, or `ctx.speed_of_sound`. Source properties include `min_gain`,
+`max_gain`, `cone_inner_angle`, `cone_outer_angle`, `cone_outer_gain`, and
+`source_type`. Set listener forward/up together through `listener.orientation`.
+`ctx.group(voices)` retains a group and issues native batch play/pause/stop/rewind
+commands. The group does not own or independently close its sources.
+
+`get_parameter()` on contexts, devices, sources, listeners and buffers accepts
+integer constants or full names such as `"AL_GAIN"`. Object queries use registered
+output shapes; `integer=True` selects integer object results. Context queries use
+`kind="float"`, `"double"`, `"int"` or `"bool"`. `set_parameter()` supports native
+object parameters, while resource bindings use the managed properties.
+`ctx.vendor`, `renderer` and `version`, plus `device.version`, expose implementation
+information. Enum lookup and advanced FFI procedure lookup are available through
+`enum_value()` and `function_address()`.
+
+With EFX support, create effects, filters and slots:
+
+```python
+# Inside ctx.activate():
+reverb = ctx.create_effect(EffectType.REVERB, decay_time=1.8)
+slot = ctx.create_effect_slot(effect=reverb)
+lowpass = ctx.create_filter(FilterType.LOWPASS, gain_hf=0.4)
+voice.direct_filter = lowpass
+voice.set_send(0, slot)
+reverb.parameters["decay_time"] = 2.2
+slot.refresh()  # Native slots copy effect parameters.
+```
+
+`EffectType` covers all 13 standard effects plus NULL, and `FilterType` covers
+lowpass/highpass/bandpass plus NULL. `parameters` is a live, fixed-key mapping;
+`configure(**parameters)` applies named settings in order and stops on an error.
+Sources retain routed slots and filters. Unbind sends or close their sources before
+closing slots. Effect/filter/slot resource blocks follow the same lifetime and
+context rules as buffers and sources. EFX source controls include air absorption,
+room rolloff, HF cone gain and automatic filter gains; listener scaling is exposed
+as `meters_per_unit`.
+
+`LoopbackDevice` renders PCM synchronously without audio hardware. Its
+`create_context(sample_rate=..., format=AudioFormat.STEREO16)` selects output
+layout; `render(frames)` returns native-endian PCM. Use one live context per
+loopback device so another context cannot change the output layout unexpectedly.
+See the offline example for writing WAV with the proper byte order.
+
+Capture uses a separate device and does not require a rendering context:
+
+```python
+with CaptureDevice(sample_rate=16000) as microphone:
+    with microphone.recording():
+        # In an application's update loop:
+        pcm = microphone.read()  # All currently available frames; does not wait.
+```
+
+`read(n)` rejects requests exceeding `available_frames`; sizes are in PCM frames,
+not bytes. Supply `buffer_frames` to configure ring capacity. `recording()` restores
+previous recording state on exit, including for nested blocks and exceptions.
+The capture example only opens a microphone when explicitly run with `--record`.
+
+Optional controls include `buffer.loop_points`, `ctx.deferred_updates()`,
+`source.latency` (seconds), `device.timing` (nanoseconds), HRTF status/names and
+`device.reset(hrtf=..., hrtf_id=...)`, device reopen, pause and resume. Reset/reopen
+can reconfigure an active playback device; actual support depends on the driver.
+Dedicated optional interfaces raise `NotImplementedError` if unsupported.
+
 ## Design
 
 - **Two-layer architecture**
-  - `openal_py._core` — a thin, typed Cython extension that wraps every
-    function in `al.h` / `alc.h` with exact C types. No Python semantics.
+  - `openal_py._core` — checked Cython wrappers for the Python-facing
+    operations, backed by generated native declarations and trampolines.
   - `openal_py` — plain Python classes (`Device`, `Context`, `Buffer`,
     `Source`, `Listener`) that provide the pythonic API.
 - **Runtime library selection** — prefer the bundled shared library when it

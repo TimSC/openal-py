@@ -8,6 +8,14 @@ dist/
 .venv/
 venv/
 
+# Compiled extensions and distribution archives (keep generated C sources tracked)
+*.so
+*.so.*
+*.pyd
+*.dll
+*.dylib
+*.whl
+
 # OpenAL-soft submodule build artifacts (the submodule's own .gitignore
 # covers its source tree; keep its build dir out of the superproject)
 openal-soft/build/
@@ -15,4 +23,26 @@ openal-soft/build/
 # meson-python / test scratch
 .mesonpy-*/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 wheelhouse/
+
+# Local build configurations
+/build-*/
+/build_*/
+/cmake-build-*/
+
+# Local editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

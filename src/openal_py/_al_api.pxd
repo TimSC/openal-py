@@ -39,7 +39,7 @@ cdef extern from "AL/al.h":
 
 cdef extern from "_api_table.h":
     bint openal_py_init(const char* libpath, bint require_devices) nogil
-    bint openal_py_has_symbol(const char* name) nogil
+    bint openal_py_has_symbol(const char* name, ALCdevice* device) nogil
     const char* openal_py_library_path() nogil
 
     ctypedef void GUID

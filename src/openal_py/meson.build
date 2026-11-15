@@ -38,7 +38,7 @@ core = py.extension_module(
 
 py.install_sources(
     ['__init__.py', '_errors.py', '_constants.py', '_finalize.py', '_loader.py',
-     '_types.py', 'py.typed', '_core.pyi', 'device.py', 'context.py', 'listener.py', 'source.py', 'buffer.py'],
+     '_types.py', '_parameters.py', 'capture.py', 'loopback.py', 'group.py', 'effects.py', 'py.typed', '_core.pyi', 'device.py', 'context.py', 'listener.py', 'source.py', 'buffer.py'],
     subdir: 'openal_py',
 )
 

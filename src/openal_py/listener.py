@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from openal_py._types import Vector3
+from openal_py._parameters import Parameter, ParameterValue, resolve
 from openal_py._errors import ContextNotCurrentError
 
 if TYPE_CHECKING:
@@ -97,6 +98,39 @@ class Listener:
     @gain.setter
     def gain(self, value: float) -> None:
         self._set(AL.AL_GAIN, float(value))
+
+    @property
+    def orientation(self) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+        value = self._orientation6
+        return value[:3], value[3:]
+
+    @orientation.setter
+    def orientation(self, value: tuple[Vector3, Vector3]) -> None:
+        forward, up = value
+        if len(forward) != 3 or len(up) != 3:
+            raise ValueError('orientation requires forward and up vectors of length three')
+        self._set(AL.AL_ORIENTATION, (*forward, *up))
+
+    def get_parameter(self, parameter: Parameter, *, integer: bool = False) -> ParameterValue:
+        self.context._require_current()
+        return cast(ParameterValue, _core.object_parameter('listener', 0, resolve(AL, parameter), integer))
+
+    def set_parameter(self, parameter: Parameter, value: ParameterValue) -> None:
+        self._set(resolve(AL, parameter), value)
+
+    @property
+    def meters_per_unit(self) -> float:
+        self.context._require_current()
+        if not self.context.device.supports('ALC_EXT_EFX'):
+            raise NotImplementedError('ALC_EXT_EFX is unavailable')
+        return float(self._get(AL.AL_METERS_PER_UNIT))
+
+    @meters_per_unit.setter
+    def meters_per_unit(self, value: float) -> None:
+        self.context._require_current()
+        if not self.context.device.supports('ALC_EXT_EFX'):
+            raise NotImplementedError('ALC_EXT_EFX is unavailable')
+        self._set(AL.AL_METERS_PER_UNIT, float(value))
 
     def __repr__(self) -> str:
         return f"Listener(context={self.context!r})"

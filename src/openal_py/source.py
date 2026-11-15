@@ -11,10 +11,12 @@ from openal_py._errors import ContextMismatchError, ResourceClosedError
 if TYPE_CHECKING:
     from openal_py.context import Context
     from openal_py.buffer import Buffer
+    from openal_py.effects import Filter, AuxiliaryEffectSlot
 
 from openal_py import _core
 from openal_py import _finalize
 from openal_py._constants import AL
+from openal_py._parameters import Parameter, ParameterValue, PlaybackLatency, resolve
 
 
 class SourceState(IntEnum):
@@ -22,6 +24,12 @@ class SourceState(IntEnum):
     PLAYING = AL.AL_PLAYING
     PAUSED = AL.AL_PAUSED
     STOPPED = AL.AL_STOPPED
+
+
+class SourceType(IntEnum):
+    STATIC = AL.AL_STATIC
+    STREAMING = AL.AL_STREAMING
+    UNDETERMINED = AL.AL_UNDETERMINED
 
 
 class Source:
@@ -41,8 +49,11 @@ class Source:
         self._handle: int | None = handle
         self._owned = owned
         self._buffer_refs: list[Buffer] = []
+        self._direct_filter: Filter | None = None
+        self._send_refs: dict[int, tuple[AuxiliaryEffectSlot, Filter | None]] = {}
+        self._retained: list[object] = []
         self._finalizer = (_finalize.register(
-            self, context._state, handle, _core.delete_sources, self._buffer_refs
+            self, context._state, handle, _core.delete_sources, self._retained
         ) if owned else None)
         context._sources[handle] = self
 
@@ -77,10 +88,12 @@ class Source:
         if self._handle is not None:
             if self._owned:
                 _finalize.release(
-                    self.context._state, self._handle, _core.delete_sources, self._buffer_refs
+                    self.context._state, self._handle, _core.delete_sources, self._retained
                 )
-            else:
-                self._buffer_refs.clear()
+            self._buffer_refs.clear()
+            self._send_refs.clear()
+            self._direct_filter = None
+            self._retained.clear()
             self.context._sources.pop(self._handle, None)
             self._handle = None
             if self._finalizer is not None:
@@ -248,6 +261,7 @@ class Source:
             raise TypeError(f"expected Buffer or None, got {type(value)!r}")
         self._set(AL.AL_BUFFER, h)
         self._buffer_refs[:] = [] if value is None else [value]
+        self._sync_retained()
 
     def rewind(self) -> None:
         """Return the source to INITIAL, resetting its playback position."""
@@ -304,6 +318,7 @@ class Source:
             handles.append(buffer.handle)
         _core.source_queue_buffers(self._handle, handles)
         self._buffer_refs.extend(entries)
+        self._sync_retained()
 
     def unqueue_buffers(self, count: int | None = None) -> list[Buffer]:
         """Remove processed entries in queue order; default to all processed entries."""
@@ -322,7 +337,197 @@ class Source:
             else:
                 buffer = self.context.get_buffer(handle) or Buffer.from_handle(self.context, handle)
             result.append(buffer)
+        self._sync_retained()
         return result
+
+    def _sync_retained(self) -> None:
+        retained: list[object] = list(self._buffer_refs)
+        if self._direct_filter is not None:
+            retained.append(self._direct_filter)
+        for slot, filter in self._send_refs.values():
+            retained.append(slot)
+            if filter is not None:
+                retained.append(filter)
+        self._retained[:] = retained
+
+    @property
+    def source_type(self) -> SourceType:
+        return SourceType(self._geti(AL.AL_SOURCE_TYPE))
+
+    def get_parameter(self, parameter: Parameter, *, integer: bool = False) -> ParameterValue:
+        self._require_current()
+        return cast(ParameterValue, _core.object_parameter('source', self.handle, resolve(AL, parameter), integer))
+
+    def set_parameter(self, parameter: Parameter, value: ParameterValue) -> None:
+        code = resolve(AL, parameter)
+        if code in (AL.AL_BUFFER, AL.AL_DIRECT_FILTER, AL.AL_AUXILIARY_SEND_FILTER):
+            raise ValueError('use buffer, direct_filter, or set_send() for resource bindings')
+        self._set(code, value)
+
+    @property
+    def latency(self) -> PlaybackLatency:
+        self._require_current()
+        if not self.context.supports('AL_SOFT_source_latency'):
+            raise NotImplementedError('AL_SOFT_source_latency is unavailable')
+        return PlaybackLatency(*_core.source_latency(self.handle))
+
+    @property
+    def direct_filter(self) -> Filter | None:
+        self._require_current()
+        return self._direct_filter
+
+    @direct_filter.setter
+    def direct_filter(self, filter: Filter | None) -> None:
+        from openal_py.effects import Filter
+        self._require_current()
+        if not self.context.device.supports('ALC_EXT_EFX'):
+            raise NotImplementedError('ALC_EXT_EFX is unavailable')
+        if filter is not None:
+            if not isinstance(filter, Filter):
+                raise TypeError('expected Filter or None')
+            if filter.context is not self.context:
+                raise ContextMismatchError('filter belongs to another context')
+            filter._require_current()
+        self._set(AL.AL_DIRECT_FILTER, 0 if filter is None else filter.handle)
+        self._direct_filter = filter
+        self._sync_retained()
+
+    def set_send(self, index: int, slot: AuxiliaryEffectSlot | None, *, filter: Filter | None = None) -> None:
+        from openal_py.effects import AuxiliaryEffectSlot, Filter
+        self._require_current()
+        if not self.context.device.supports('ALC_EXT_EFX'):
+            raise NotImplementedError('ALC_EXT_EFX is unavailable')
+        n = operator.index(index)
+        if n < 0:
+            raise ValueError('send index must be nonnegative')
+        if slot is None and filter is not None:
+            raise ValueError('a filter requires a send slot')
+        for resource, cls in ((slot, AuxiliaryEffectSlot), (filter, Filter)):
+            if resource is not None:
+                if not isinstance(resource, cls):
+                    raise TypeError('expected effect slot and optional filter')
+                if resource.context is not self.context:
+                    raise ContextMismatchError('send resource belongs to another context')
+                resource._require_current()
+        self._set(AL.AL_AUXILIARY_SEND_FILTER,
+                  (0 if slot is None else slot.handle, n, 0 if filter is None else filter.handle))
+        if slot is None:
+            self._send_refs.pop(n, None)
+        else:
+            self._send_refs[n] = (slot, filter)
+        self._sync_retained()
+
+    @property
+    def min_gain(self) -> float:
+        return float(self._get(AL.AL_MIN_GAIN))
+
+    @min_gain.setter
+    def min_gain(self, value: float) -> None:
+        self._set(AL.AL_MIN_GAIN, float(value))
+
+    @property
+    def max_gain(self) -> float:
+        return float(self._get(AL.AL_MAX_GAIN))
+
+    @max_gain.setter
+    def max_gain(self, value: float) -> None:
+        self._set(AL.AL_MAX_GAIN, float(value))
+
+    @property
+    def cone_inner_angle(self) -> float:
+        return float(self._get(AL.AL_CONE_INNER_ANGLE))
+
+    @cone_inner_angle.setter
+    def cone_inner_angle(self, value: float) -> None:
+        self._set(AL.AL_CONE_INNER_ANGLE, float(value))
+
+    @property
+    def cone_outer_angle(self) -> float:
+        return float(self._get(AL.AL_CONE_OUTER_ANGLE))
+
+    @cone_outer_angle.setter
+    def cone_outer_angle(self, value: float) -> None:
+        self._set(AL.AL_CONE_OUTER_ANGLE, float(value))
+
+    @property
+    def cone_outer_gain(self) -> float:
+        return float(self._get(AL.AL_CONE_OUTER_GAIN))
+
+    @cone_outer_gain.setter
+    def cone_outer_gain(self, value: float) -> None:
+        self._set(AL.AL_CONE_OUTER_GAIN, float(value))
+
+    @property
+    def air_absorption_factor(self) -> float:
+        self._require_efx()
+        return float(self._get(AL.AL_AIR_ABSORPTION_FACTOR))
+
+    @air_absorption_factor.setter
+    def air_absorption_factor(self, value: float) -> None:
+        self._require_efx()
+        self._set(AL.AL_AIR_ABSORPTION_FACTOR, float(value))
+
+    @property
+    def room_rolloff_factor(self) -> float:
+        self._require_efx()
+        return float(self._get(AL.AL_ROOM_ROLLOFF_FACTOR))
+
+    @room_rolloff_factor.setter
+    def room_rolloff_factor(self, value: float) -> None:
+        self._require_efx()
+        self._set(AL.AL_ROOM_ROLLOFF_FACTOR, float(value))
+
+    @property
+    def cone_outer_gain_hf(self) -> float:
+        self._require_efx()
+        return float(self._get(AL.AL_CONE_OUTER_GAINHF))
+
+    @cone_outer_gain_hf.setter
+    def cone_outer_gain_hf(self, value: float) -> None:
+        self._require_efx()
+        self._set(AL.AL_CONE_OUTER_GAINHF, float(value))
+
+    @property
+    def direct_filter_gain_hf_auto(self) -> bool:
+        self._require_efx()
+        return bool(self._geti(AL.AL_DIRECT_FILTER_GAINHF_AUTO))
+
+    @direct_filter_gain_hf_auto.setter
+    def direct_filter_gain_hf_auto(self, enabled: bool) -> None:
+        self._require_efx()
+        self._set(AL.AL_DIRECT_FILTER_GAINHF_AUTO, int(enabled))
+
+    @property
+    def auxiliary_send_filter_gain_auto(self) -> bool:
+        self._require_efx()
+        return bool(self._geti(AL.AL_AUXILIARY_SEND_FILTER_GAIN_AUTO))
+
+    @auxiliary_send_filter_gain_auto.setter
+    def auxiliary_send_filter_gain_auto(self, enabled: bool) -> None:
+        self._require_efx()
+        self._set(AL.AL_AUXILIARY_SEND_FILTER_GAIN_AUTO, int(enabled))
+
+    @property
+    def auxiliary_send_filter_gain_hf_auto(self) -> bool:
+        self._require_efx()
+        return bool(self._geti(AL.AL_AUXILIARY_SEND_FILTER_GAINHF_AUTO))
+
+    @auxiliary_send_filter_gain_hf_auto.setter
+    def auxiliary_send_filter_gain_hf_auto(self, enabled: bool) -> None:
+        self._require_efx()
+        self._set(AL.AL_AUXILIARY_SEND_FILTER_GAINHF_AUTO, int(enabled))
+
+    def _require_efx(self) -> None:
+        self._require_current()
+        if not self.context.device.supports('ALC_EXT_EFX'):
+            raise NotImplementedError('ALC_EXT_EFX is unavailable')
+
+    def get_send(self, index: int) -> tuple[AuxiliaryEffectSlot, Filter | None] | None:
+        self._require_efx()
+        n = operator.index(index)
+        if n < 0:
+            raise ValueError('send index must be nonnegative')
+        return self._send_refs.get(n)
 
     def __repr__(self) -> str:
         return f"Source(handle={self.handle}, closed={self.closed})"

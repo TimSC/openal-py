@@ -34,12 +34,33 @@ from openal_py._constants import AL, ALC
 from openal_py.device import Device
 from openal_py.context import Context
 from openal_py.listener import Listener
-from openal_py.source import Source, SourceState
+from openal_py.source import Source, SourceState, SourceType
+from openal_py.capture import CaptureDevice
+from openal_py.loopback import LoopbackDevice
+from openal_py.group import SourceGroup
+from openal_py.effects import Effect, EffectType, Filter, FilterType, AuxiliaryEffectSlot
+from openal_py._parameters import DistanceModel, HRTFStatus, DeviceTiming, PlaybackLatency, Parameter, ParameterValue, NumericKind
 from openal_py.buffer import Buffer, AudioFormat, from_wav, from_file
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "Parameter",
+    "ParameterValue",
+    "NumericKind",
+    "CaptureDevice",
+    "LoopbackDevice",
+    "SourceGroup",
+    "SourceType",
+    "Effect",
+    "EffectType",
+    "Filter",
+    "FilterType",
+    "AuxiliaryEffectSlot",
+    "DistanceModel",
+    "HRTFStatus",
+    "DeviceTiming",
+    "PlaybackLatency",
     "AudioFile",
     "PCMData",
     "Vector3",

@@ -12,6 +12,8 @@ from openal_py import _core, _finalize
 from openal_py._constants import AL
 from openal_py._errors import ResourceClosedError
 from openal_py._types import AudioFile, PCMData
+from openal_py._parameters import Parameter, ParameterValue, resolve
+from typing import cast
 
 if TYPE_CHECKING:
     from openal_py.context import Context
@@ -211,6 +213,28 @@ class Buffer:
         """Duration in seconds (zero for an empty buffer)."""
         rate = self.sample_rate
         return self.frame_count / rate if rate else 0.0
+
+    def get_parameter(self, parameter: Parameter, *, integer: bool = True) -> ParameterValue:
+        self._require_current()
+        return cast(ParameterValue, _core.object_parameter('buffer', self.handle, resolve(AL, parameter), integer))
+
+    def set_parameter(self, parameter: Parameter, value: ParameterValue) -> None:
+        self._require_current()
+        _core.buffer_set(self.handle, resolve(AL, parameter), value)
+
+    @property
+    def loop_points(self) -> tuple[int, int]:
+        self._require_current()
+        if not self.context.supports('AL_SOFT_loop_points'):
+            raise NotImplementedError('AL_SOFT_loop_points is unavailable')
+        return cast(tuple[int, int], self.get_parameter(AL.AL_LOOP_POINTS_SOFT))
+
+    @loop_points.setter
+    def loop_points(self, points: tuple[int, int]) -> None:
+        self._require_current()
+        if not self.context.supports('AL_SOFT_loop_points'):
+            raise NotImplementedError('AL_SOFT_loop_points is unavailable')
+        self.set_parameter(AL.AL_LOOP_POINTS_SOFT, points)
 
     def __enter__(self) -> Buffer:
         self._require_current()

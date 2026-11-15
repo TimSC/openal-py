@@ -207,3 +207,42 @@ def test_bundle_preference_and_full_device_list(isolated_package, stub_library, 
     )
     result = run_isolated(root, code, override=bundle if explicit else None)
     assert result.returncode == 0, result.stderr
+
+
+def test_proc_only_extension_addresses_follow_current_context(isolated_package, stub_library, tmp_path):
+    """Routers need not export EFX; their proc addresses can differ by context."""
+    import re
+    root, _ = isolated_package
+    source = tmp_path / 'stub.c'
+    text = source.read_text()
+    text = text.replace('#include "_api_table.h"', '''#include "_api_table.h"
+#include <string.h>
+static ALCcontext* active_context;
+static void generate_one(ALsizei n, ALuint* values) { if(n) values[0]=101; }
+static void generate_two(ALsizei n, ALuint* values) { if(n) values[0]=102; }
+''')
+    text, current_count = re.subn(
+        r'(ALCcontext\s*\*\s*alcGetCurrentContext\([^\n]+\)\s*\{)[^\n]*\}',
+        r'\1 return active_context; }', text)
+    text, set_count = re.subn(
+        r'(ALCboolean\s+alcMakeContextCurrent\([^\n]+\)\s*\{)[^\n]*\}',
+        r'\1 active_context=context; return 1; }', text)
+    text, proc_count = re.subn(
+        r'(void\s*\*\s*alGetProcAddress\([^\n]+\)\s*\{)[^\n]*\}',
+        r'\1 if(strcmp(fname,"alGenEffects")) return 0; '
+        r'return (void*)(active_context==(ALCcontext*)1 ? generate_one : generate_two); }', text)
+    assert (current_count, set_count, proc_count) == (1, 1, 1)
+    source.write_text(text)
+    repo = Path(__file__).resolve().parents[1]
+    subprocess.run(['cc', '-shared', '-fPIC', '-DAL_LIBTYPE_STATIC',
+                    '-I', str(repo / 'src/openal_py'), '-I', str(repo / 'openal-soft/include'),
+                    str(source), '-o', str(stub_library)], check=True, capture_output=True, text=True)
+    result = run_isolated(root, '''
+from openal_py import _core
+_core.make_context_current(1)
+assert _core.gen_effects(1) == [101]
+_core.make_context_current(2)
+assert _core.gen_effects(1) == [102]
+_core.make_context_current(None)
+''', override=stub_library)
+    assert result.returncode == 0, result.stderr

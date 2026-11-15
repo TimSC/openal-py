@@ -197,7 +197,7 @@ def gen_pxd(cmds, typedefs) -> str:
         lines.append(f"    ctypedef {c_type} {name}")
     lines += ["", 'cdef extern from "_api_table.h":',
               "    bint openal_py_init(const char* libpath, bint require_devices) nogil",
-              '    bint openal_py_has_symbol(const char* name) nogil',
+              '    bint openal_py_has_symbol(const char* name, ALCdevice* device) nogil',
               '    const char* openal_py_library_path() nogil', "",
               "    ctypedef void GUID", ""]
     for c in cmds:
@@ -213,7 +213,7 @@ def gen_c_header(cmds) -> str:
              "", "#include <AL/al.h>", "#include <AL/alc.h>", "#include <AL/alext.h>", "#include <stdint.h>",
              "", "#ifdef __cplusplus", 'extern "C" {', "#endif", ""]
     lines.append("int openal_py_init(const char* libpath, int require_devices);")
-    lines.append("int openal_py_has_symbol(const char* name);")
+    lines.append("int openal_py_has_symbol(const char* name, ALCdevice* device);")
     lines.append("const char* openal_py_library_path(void);")
     lines.append("")
     for c in cmds:
@@ -366,9 +366,31 @@ int openal_py_init(const char* libpath, int require_devices)
     return 1;
 }
 
-int openal_py_has_symbol(const char* name)
+static void* resolve_optional(const char* name, ALCdevice* device)
 {
-    return g_handle && lookup(g_handle, name) != NULL;
+    if (strncmp(name, "alc", 3) == 0)
+        return fn.alcGetProcAddress(device, name);
+    return fn.alGetProcAddress(name);
+}
+
+int openal_py_has_symbol(const char* name, ALCdevice* device)
+{
+    if (!initialized)
+        return 0;
+    /* Proc-only addresses can be context/device-specific: refresh each use. */
+"""
+    for c in cmds:
+        if not c.get("ext"):
+            continue
+        argtypes = ", ".join(ct for ct, _ in c["params"]) or "void"
+        src += (f'    if (strcmp(name, "{c["name"]}") == 0) {{\n'
+                f'        fn.{c["name"]} = '
+                f'({c["ret"]} (*)({argtypes})) lookup(g_handle, name);\n'
+                f'        if (!fn.{c["name"]}) fn.{c["name"]} = '
+                f'({c["ret"]} (*)({argtypes})) resolve_optional(name, device);\n'
+                f'        return fn.{c["name"]} != NULL;\n    }}\n')
+    src += """
+    return lookup(g_handle, name) != NULL;
 }
 
 const char* openal_py_library_path(void)

@@ -850,9 +850,1170 @@ int openal_py_init(const char* libpath, int require_devices)
     return 1;
 }
 
-int openal_py_has_symbol(const char* name)
+static void* resolve_optional(const char* name, ALCdevice* device)
 {
-    return g_handle && lookup(g_handle, name) != NULL;
+    if (strncmp(name, "alc", 3) == 0)
+        return fn.alcGetProcAddress(device, name);
+    return fn.alGetProcAddress(name);
+}
+
+int openal_py_has_symbol(const char* name, ALCdevice* device)
+{
+    if (!initialized)
+        return 0;
+    /* Proc-only addresses can be context/device-specific: refresh each use. */
+    if (strcmp(name, "alBufferDataStatic") == 0) {
+        fn.alBufferDataStatic = (void (*)(ALuint, ALenum, ALvoid *, ALsizei, ALsizei)) lookup(g_handle, name);
+        if (!fn.alBufferDataStatic) fn.alBufferDataStatic = (void (*)(ALuint, ALenum, ALvoid *, ALsizei, ALsizei)) resolve_optional(name, device);
+        return fn.alBufferDataStatic != NULL;
+    }
+    if (strcmp(name, "alGenEffects") == 0) {
+        fn.alGenEffects = (void (*)(ALsizei, ALuint *)) lookup(g_handle, name);
+        if (!fn.alGenEffects) fn.alGenEffects = (void (*)(ALsizei, ALuint *)) resolve_optional(name, device);
+        return fn.alGenEffects != NULL;
+    }
+    if (strcmp(name, "alDeleteEffects") == 0) {
+        fn.alDeleteEffects = (void (*)(ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alDeleteEffects) fn.alDeleteEffects = (void (*)(ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alDeleteEffects != NULL;
+    }
+    if (strcmp(name, "alIsEffect") == 0) {
+        fn.alIsEffect = (ALboolean (*)(ALuint)) lookup(g_handle, name);
+        if (!fn.alIsEffect) fn.alIsEffect = (ALboolean (*)(ALuint)) resolve_optional(name, device);
+        return fn.alIsEffect != NULL;
+    }
+    if (strcmp(name, "alEffecti") == 0) {
+        fn.alEffecti = (void (*)(ALuint, ALenum, ALint)) lookup(g_handle, name);
+        if (!fn.alEffecti) fn.alEffecti = (void (*)(ALuint, ALenum, ALint)) resolve_optional(name, device);
+        return fn.alEffecti != NULL;
+    }
+    if (strcmp(name, "alEffectiv") == 0) {
+        fn.alEffectiv = (void (*)(ALuint, ALenum, const ALint *)) lookup(g_handle, name);
+        if (!fn.alEffectiv) fn.alEffectiv = (void (*)(ALuint, ALenum, const ALint *)) resolve_optional(name, device);
+        return fn.alEffectiv != NULL;
+    }
+    if (strcmp(name, "alEffectf") == 0) {
+        fn.alEffectf = (void (*)(ALuint, ALenum, ALfloat)) lookup(g_handle, name);
+        if (!fn.alEffectf) fn.alEffectf = (void (*)(ALuint, ALenum, ALfloat)) resolve_optional(name, device);
+        return fn.alEffectf != NULL;
+    }
+    if (strcmp(name, "alEffectfv") == 0) {
+        fn.alEffectfv = (void (*)(ALuint, ALenum, const ALfloat *)) lookup(g_handle, name);
+        if (!fn.alEffectfv) fn.alEffectfv = (void (*)(ALuint, ALenum, const ALfloat *)) resolve_optional(name, device);
+        return fn.alEffectfv != NULL;
+    }
+    if (strcmp(name, "alGetEffecti") == 0) {
+        fn.alGetEffecti = (void (*)(ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetEffecti) fn.alGetEffecti = (void (*)(ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetEffecti != NULL;
+    }
+    if (strcmp(name, "alGetEffectiv") == 0) {
+        fn.alGetEffectiv = (void (*)(ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetEffectiv) fn.alGetEffectiv = (void (*)(ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetEffectiv != NULL;
+    }
+    if (strcmp(name, "alGetEffectf") == 0) {
+        fn.alGetEffectf = (void (*)(ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetEffectf) fn.alGetEffectf = (void (*)(ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetEffectf != NULL;
+    }
+    if (strcmp(name, "alGetEffectfv") == 0) {
+        fn.alGetEffectfv = (void (*)(ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetEffectfv) fn.alGetEffectfv = (void (*)(ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetEffectfv != NULL;
+    }
+    if (strcmp(name, "alGenFilters") == 0) {
+        fn.alGenFilters = (void (*)(ALsizei, ALuint *)) lookup(g_handle, name);
+        if (!fn.alGenFilters) fn.alGenFilters = (void (*)(ALsizei, ALuint *)) resolve_optional(name, device);
+        return fn.alGenFilters != NULL;
+    }
+    if (strcmp(name, "alDeleteFilters") == 0) {
+        fn.alDeleteFilters = (void (*)(ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alDeleteFilters) fn.alDeleteFilters = (void (*)(ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alDeleteFilters != NULL;
+    }
+    if (strcmp(name, "alIsFilter") == 0) {
+        fn.alIsFilter = (ALboolean (*)(ALuint)) lookup(g_handle, name);
+        if (!fn.alIsFilter) fn.alIsFilter = (ALboolean (*)(ALuint)) resolve_optional(name, device);
+        return fn.alIsFilter != NULL;
+    }
+    if (strcmp(name, "alFilteri") == 0) {
+        fn.alFilteri = (void (*)(ALuint, ALenum, ALint)) lookup(g_handle, name);
+        if (!fn.alFilteri) fn.alFilteri = (void (*)(ALuint, ALenum, ALint)) resolve_optional(name, device);
+        return fn.alFilteri != NULL;
+    }
+    if (strcmp(name, "alFilteriv") == 0) {
+        fn.alFilteriv = (void (*)(ALuint, ALenum, const ALint *)) lookup(g_handle, name);
+        if (!fn.alFilteriv) fn.alFilteriv = (void (*)(ALuint, ALenum, const ALint *)) resolve_optional(name, device);
+        return fn.alFilteriv != NULL;
+    }
+    if (strcmp(name, "alFilterf") == 0) {
+        fn.alFilterf = (void (*)(ALuint, ALenum, ALfloat)) lookup(g_handle, name);
+        if (!fn.alFilterf) fn.alFilterf = (void (*)(ALuint, ALenum, ALfloat)) resolve_optional(name, device);
+        return fn.alFilterf != NULL;
+    }
+    if (strcmp(name, "alFilterfv") == 0) {
+        fn.alFilterfv = (void (*)(ALuint, ALenum, const ALfloat *)) lookup(g_handle, name);
+        if (!fn.alFilterfv) fn.alFilterfv = (void (*)(ALuint, ALenum, const ALfloat *)) resolve_optional(name, device);
+        return fn.alFilterfv != NULL;
+    }
+    if (strcmp(name, "alGetFilteri") == 0) {
+        fn.alGetFilteri = (void (*)(ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetFilteri) fn.alGetFilteri = (void (*)(ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetFilteri != NULL;
+    }
+    if (strcmp(name, "alGetFilteriv") == 0) {
+        fn.alGetFilteriv = (void (*)(ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetFilteriv) fn.alGetFilteriv = (void (*)(ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetFilteriv != NULL;
+    }
+    if (strcmp(name, "alGetFilterf") == 0) {
+        fn.alGetFilterf = (void (*)(ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetFilterf) fn.alGetFilterf = (void (*)(ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetFilterf != NULL;
+    }
+    if (strcmp(name, "alGetFilterfv") == 0) {
+        fn.alGetFilterfv = (void (*)(ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetFilterfv) fn.alGetFilterfv = (void (*)(ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetFilterfv != NULL;
+    }
+    if (strcmp(name, "alGenAuxiliaryEffectSlots") == 0) {
+        fn.alGenAuxiliaryEffectSlots = (void (*)(ALsizei, ALuint *)) lookup(g_handle, name);
+        if (!fn.alGenAuxiliaryEffectSlots) fn.alGenAuxiliaryEffectSlots = (void (*)(ALsizei, ALuint *)) resolve_optional(name, device);
+        return fn.alGenAuxiliaryEffectSlots != NULL;
+    }
+    if (strcmp(name, "alDeleteAuxiliaryEffectSlots") == 0) {
+        fn.alDeleteAuxiliaryEffectSlots = (void (*)(ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alDeleteAuxiliaryEffectSlots) fn.alDeleteAuxiliaryEffectSlots = (void (*)(ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alDeleteAuxiliaryEffectSlots != NULL;
+    }
+    if (strcmp(name, "alIsAuxiliaryEffectSlot") == 0) {
+        fn.alIsAuxiliaryEffectSlot = (ALboolean (*)(ALuint)) lookup(g_handle, name);
+        if (!fn.alIsAuxiliaryEffectSlot) fn.alIsAuxiliaryEffectSlot = (ALboolean (*)(ALuint)) resolve_optional(name, device);
+        return fn.alIsAuxiliaryEffectSlot != NULL;
+    }
+    if (strcmp(name, "alAuxiliaryEffectSloti") == 0) {
+        fn.alAuxiliaryEffectSloti = (void (*)(ALuint, ALenum, ALint)) lookup(g_handle, name);
+        if (!fn.alAuxiliaryEffectSloti) fn.alAuxiliaryEffectSloti = (void (*)(ALuint, ALenum, ALint)) resolve_optional(name, device);
+        return fn.alAuxiliaryEffectSloti != NULL;
+    }
+    if (strcmp(name, "alAuxiliaryEffectSlotiv") == 0) {
+        fn.alAuxiliaryEffectSlotiv = (void (*)(ALuint, ALenum, const ALint *)) lookup(g_handle, name);
+        if (!fn.alAuxiliaryEffectSlotiv) fn.alAuxiliaryEffectSlotiv = (void (*)(ALuint, ALenum, const ALint *)) resolve_optional(name, device);
+        return fn.alAuxiliaryEffectSlotiv != NULL;
+    }
+    if (strcmp(name, "alAuxiliaryEffectSlotf") == 0) {
+        fn.alAuxiliaryEffectSlotf = (void (*)(ALuint, ALenum, ALfloat)) lookup(g_handle, name);
+        if (!fn.alAuxiliaryEffectSlotf) fn.alAuxiliaryEffectSlotf = (void (*)(ALuint, ALenum, ALfloat)) resolve_optional(name, device);
+        return fn.alAuxiliaryEffectSlotf != NULL;
+    }
+    if (strcmp(name, "alAuxiliaryEffectSlotfv") == 0) {
+        fn.alAuxiliaryEffectSlotfv = (void (*)(ALuint, ALenum, const ALfloat *)) lookup(g_handle, name);
+        if (!fn.alAuxiliaryEffectSlotfv) fn.alAuxiliaryEffectSlotfv = (void (*)(ALuint, ALenum, const ALfloat *)) resolve_optional(name, device);
+        return fn.alAuxiliaryEffectSlotfv != NULL;
+    }
+    if (strcmp(name, "alGetAuxiliaryEffectSloti") == 0) {
+        fn.alGetAuxiliaryEffectSloti = (void (*)(ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetAuxiliaryEffectSloti) fn.alGetAuxiliaryEffectSloti = (void (*)(ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetAuxiliaryEffectSloti != NULL;
+    }
+    if (strcmp(name, "alGetAuxiliaryEffectSlotiv") == 0) {
+        fn.alGetAuxiliaryEffectSlotiv = (void (*)(ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetAuxiliaryEffectSlotiv) fn.alGetAuxiliaryEffectSlotiv = (void (*)(ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetAuxiliaryEffectSlotiv != NULL;
+    }
+    if (strcmp(name, "alGetAuxiliaryEffectSlotf") == 0) {
+        fn.alGetAuxiliaryEffectSlotf = (void (*)(ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetAuxiliaryEffectSlotf) fn.alGetAuxiliaryEffectSlotf = (void (*)(ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetAuxiliaryEffectSlotf != NULL;
+    }
+    if (strcmp(name, "alGetAuxiliaryEffectSlotfv") == 0) {
+        fn.alGetAuxiliaryEffectSlotfv = (void (*)(ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetAuxiliaryEffectSlotfv) fn.alGetAuxiliaryEffectSlotfv = (void (*)(ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetAuxiliaryEffectSlotfv != NULL;
+    }
+    if (strcmp(name, "alBufferSubDataSOFT") == 0) {
+        fn.alBufferSubDataSOFT = (void (*)(ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) lookup(g_handle, name);
+        if (!fn.alBufferSubDataSOFT) fn.alBufferSubDataSOFT = (void (*)(ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) resolve_optional(name, device);
+        return fn.alBufferSubDataSOFT != NULL;
+    }
+    if (strcmp(name, "alRequestFoldbackStop") == 0) {
+        fn.alRequestFoldbackStop = (void (*)(void)) lookup(g_handle, name);
+        if (!fn.alRequestFoldbackStop) fn.alRequestFoldbackStop = (void (*)(void)) resolve_optional(name, device);
+        return fn.alRequestFoldbackStop != NULL;
+    }
+    if (strcmp(name, "alBufferSamplesSOFT") == 0) {
+        fn.alBufferSamplesSOFT = (void (*)(ALuint, ALuint, ALenum, ALsizei, ALenum, ALenum, const ALvoid *)) lookup(g_handle, name);
+        if (!fn.alBufferSamplesSOFT) fn.alBufferSamplesSOFT = (void (*)(ALuint, ALuint, ALenum, ALsizei, ALenum, ALenum, const ALvoid *)) resolve_optional(name, device);
+        return fn.alBufferSamplesSOFT != NULL;
+    }
+    if (strcmp(name, "alBufferSubSamplesSOFT") == 0) {
+        fn.alBufferSubSamplesSOFT = (void (*)(ALuint, ALsizei, ALsizei, ALenum, ALenum, const ALvoid *)) lookup(g_handle, name);
+        if (!fn.alBufferSubSamplesSOFT) fn.alBufferSubSamplesSOFT = (void (*)(ALuint, ALsizei, ALsizei, ALenum, ALenum, const ALvoid *)) resolve_optional(name, device);
+        return fn.alBufferSubSamplesSOFT != NULL;
+    }
+    if (strcmp(name, "alGetBufferSamplesSOFT") == 0) {
+        fn.alGetBufferSamplesSOFT = (void (*)(ALuint, ALsizei, ALsizei, ALenum, ALenum, ALvoid *)) lookup(g_handle, name);
+        if (!fn.alGetBufferSamplesSOFT) fn.alGetBufferSamplesSOFT = (void (*)(ALuint, ALsizei, ALsizei, ALenum, ALenum, ALvoid *)) resolve_optional(name, device);
+        return fn.alGetBufferSamplesSOFT != NULL;
+    }
+    if (strcmp(name, "alIsBufferFormatSupportedSOFT") == 0) {
+        fn.alIsBufferFormatSupportedSOFT = (ALboolean (*)(ALenum)) lookup(g_handle, name);
+        if (!fn.alIsBufferFormatSupportedSOFT) fn.alIsBufferFormatSupportedSOFT = (ALboolean (*)(ALenum)) resolve_optional(name, device);
+        return fn.alIsBufferFormatSupportedSOFT != NULL;
+    }
+    if (strcmp(name, "alSourcedSOFT") == 0) {
+        fn.alSourcedSOFT = (void (*)(ALuint, ALenum, ALdouble)) lookup(g_handle, name);
+        if (!fn.alSourcedSOFT) fn.alSourcedSOFT = (void (*)(ALuint, ALenum, ALdouble)) resolve_optional(name, device);
+        return fn.alSourcedSOFT != NULL;
+    }
+    if (strcmp(name, "alSource3dSOFT") == 0) {
+        fn.alSource3dSOFT = (void (*)(ALuint, ALenum, ALdouble, ALdouble, ALdouble)) lookup(g_handle, name);
+        if (!fn.alSource3dSOFT) fn.alSource3dSOFT = (void (*)(ALuint, ALenum, ALdouble, ALdouble, ALdouble)) resolve_optional(name, device);
+        return fn.alSource3dSOFT != NULL;
+    }
+    if (strcmp(name, "alSourcedvSOFT") == 0) {
+        fn.alSourcedvSOFT = (void (*)(ALuint, ALenum, const ALdouble *)) lookup(g_handle, name);
+        if (!fn.alSourcedvSOFT) fn.alSourcedvSOFT = (void (*)(ALuint, ALenum, const ALdouble *)) resolve_optional(name, device);
+        return fn.alSourcedvSOFT != NULL;
+    }
+    if (strcmp(name, "alGetSourcedSOFT") == 0) {
+        fn.alGetSourcedSOFT = (void (*)(ALuint, ALenum, ALdouble *)) lookup(g_handle, name);
+        if (!fn.alGetSourcedSOFT) fn.alGetSourcedSOFT = (void (*)(ALuint, ALenum, ALdouble *)) resolve_optional(name, device);
+        return fn.alGetSourcedSOFT != NULL;
+    }
+    if (strcmp(name, "alGetSource3dSOFT") == 0) {
+        fn.alGetSource3dSOFT = (void (*)(ALuint, ALenum, ALdouble *, ALdouble *, ALdouble *)) lookup(g_handle, name);
+        if (!fn.alGetSource3dSOFT) fn.alGetSource3dSOFT = (void (*)(ALuint, ALenum, ALdouble *, ALdouble *, ALdouble *)) resolve_optional(name, device);
+        return fn.alGetSource3dSOFT != NULL;
+    }
+    if (strcmp(name, "alGetSourcedvSOFT") == 0) {
+        fn.alGetSourcedvSOFT = (void (*)(ALuint, ALenum, ALdouble *)) lookup(g_handle, name);
+        if (!fn.alGetSourcedvSOFT) fn.alGetSourcedvSOFT = (void (*)(ALuint, ALenum, ALdouble *)) resolve_optional(name, device);
+        return fn.alGetSourcedvSOFT != NULL;
+    }
+    if (strcmp(name, "alSourcei64SOFT") == 0) {
+        fn.alSourcei64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT)) lookup(g_handle, name);
+        if (!fn.alSourcei64SOFT) fn.alSourcei64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT)) resolve_optional(name, device);
+        return fn.alSourcei64SOFT != NULL;
+    }
+    if (strcmp(name, "alSource3i64SOFT") == 0) {
+        fn.alSource3i64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT, ALint64SOFT, ALint64SOFT)) lookup(g_handle, name);
+        if (!fn.alSource3i64SOFT) fn.alSource3i64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT, ALint64SOFT, ALint64SOFT)) resolve_optional(name, device);
+        return fn.alSource3i64SOFT != NULL;
+    }
+    if (strcmp(name, "alSourcei64vSOFT") == 0) {
+        fn.alSourcei64vSOFT = (void (*)(ALuint, ALenum, const ALint64SOFT *)) lookup(g_handle, name);
+        if (!fn.alSourcei64vSOFT) fn.alSourcei64vSOFT = (void (*)(ALuint, ALenum, const ALint64SOFT *)) resolve_optional(name, device);
+        return fn.alSourcei64vSOFT != NULL;
+    }
+    if (strcmp(name, "alGetSourcei64SOFT") == 0) {
+        fn.alGetSourcei64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT *)) lookup(g_handle, name);
+        if (!fn.alGetSourcei64SOFT) fn.alGetSourcei64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT *)) resolve_optional(name, device);
+        return fn.alGetSourcei64SOFT != NULL;
+    }
+    if (strcmp(name, "alGetSource3i64SOFT") == 0) {
+        fn.alGetSource3i64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT *, ALint64SOFT *, ALint64SOFT *)) lookup(g_handle, name);
+        if (!fn.alGetSource3i64SOFT) fn.alGetSource3i64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT *, ALint64SOFT *, ALint64SOFT *)) resolve_optional(name, device);
+        return fn.alGetSource3i64SOFT != NULL;
+    }
+    if (strcmp(name, "alGetSourcei64vSOFT") == 0) {
+        fn.alGetSourcei64vSOFT = (void (*)(ALuint, ALenum, ALint64SOFT *)) lookup(g_handle, name);
+        if (!fn.alGetSourcei64vSOFT) fn.alGetSourcei64vSOFT = (void (*)(ALuint, ALenum, ALint64SOFT *)) resolve_optional(name, device);
+        return fn.alGetSourcei64vSOFT != NULL;
+    }
+    if (strcmp(name, "alDeferUpdatesSOFT") == 0) {
+        fn.alDeferUpdatesSOFT = (void (*)(void)) lookup(g_handle, name);
+        if (!fn.alDeferUpdatesSOFT) fn.alDeferUpdatesSOFT = (void (*)(void)) resolve_optional(name, device);
+        return fn.alDeferUpdatesSOFT != NULL;
+    }
+    if (strcmp(name, "alProcessUpdatesSOFT") == 0) {
+        fn.alProcessUpdatesSOFT = (void (*)(void)) lookup(g_handle, name);
+        if (!fn.alProcessUpdatesSOFT) fn.alProcessUpdatesSOFT = (void (*)(void)) resolve_optional(name, device);
+        return fn.alProcessUpdatesSOFT != NULL;
+    }
+    if (strcmp(name, "alGetStringiSOFT") == 0) {
+        fn.alGetStringiSOFT = (const ALchar * (*)(ALenum, ALsizei)) lookup(g_handle, name);
+        if (!fn.alGetStringiSOFT) fn.alGetStringiSOFT = (const ALchar * (*)(ALenum, ALsizei)) resolve_optional(name, device);
+        return fn.alGetStringiSOFT != NULL;
+    }
+    if (strcmp(name, "alEventControlSOFT") == 0) {
+        fn.alEventControlSOFT = (void (*)(ALsizei, const ALenum *, ALboolean)) lookup(g_handle, name);
+        if (!fn.alEventControlSOFT) fn.alEventControlSOFT = (void (*)(ALsizei, const ALenum *, ALboolean)) resolve_optional(name, device);
+        return fn.alEventControlSOFT != NULL;
+    }
+    if (strcmp(name, "alGetPointerSOFT") == 0) {
+        fn.alGetPointerSOFT = (void* (*)(ALenum)) lookup(g_handle, name);
+        if (!fn.alGetPointerSOFT) fn.alGetPointerSOFT = (void* (*)(ALenum)) resolve_optional(name, device);
+        return fn.alGetPointerSOFT != NULL;
+    }
+    if (strcmp(name, "alGetPointervSOFT") == 0) {
+        fn.alGetPointervSOFT = (void (*)(ALenum, void **)) lookup(g_handle, name);
+        if (!fn.alGetPointervSOFT) fn.alGetPointervSOFT = (void (*)(ALenum, void **)) resolve_optional(name, device);
+        return fn.alGetPointervSOFT != NULL;
+    }
+    if (strcmp(name, "alGetBufferPtrSOFT") == 0) {
+        fn.alGetBufferPtrSOFT = (void (*)(ALuint, ALenum, ALvoid **)) lookup(g_handle, name);
+        if (!fn.alGetBufferPtrSOFT) fn.alGetBufferPtrSOFT = (void (*)(ALuint, ALenum, ALvoid **)) resolve_optional(name, device);
+        return fn.alGetBufferPtrSOFT != NULL;
+    }
+    if (strcmp(name, "alGetBuffer3PtrSOFT") == 0) {
+        fn.alGetBuffer3PtrSOFT = (void (*)(ALuint, ALenum, ALvoid **, ALvoid **, ALvoid **)) lookup(g_handle, name);
+        if (!fn.alGetBuffer3PtrSOFT) fn.alGetBuffer3PtrSOFT = (void (*)(ALuint, ALenum, ALvoid **, ALvoid **, ALvoid **)) resolve_optional(name, device);
+        return fn.alGetBuffer3PtrSOFT != NULL;
+    }
+    if (strcmp(name, "alGetBufferPtrvSOFT") == 0) {
+        fn.alGetBufferPtrvSOFT = (void (*)(ALuint, ALenum, ALvoid **)) lookup(g_handle, name);
+        if (!fn.alGetBufferPtrvSOFT) fn.alGetBufferPtrvSOFT = (void (*)(ALuint, ALenum, ALvoid **)) resolve_optional(name, device);
+        return fn.alGetBufferPtrvSOFT != NULL;
+    }
+    if (strcmp(name, "alSourcePlayAtTimeSOFT") == 0) {
+        fn.alSourcePlayAtTimeSOFT = (void (*)(ALuint, ALint64SOFT)) lookup(g_handle, name);
+        if (!fn.alSourcePlayAtTimeSOFT) fn.alSourcePlayAtTimeSOFT = (void (*)(ALuint, ALint64SOFT)) resolve_optional(name, device);
+        return fn.alSourcePlayAtTimeSOFT != NULL;
+    }
+    if (strcmp(name, "alSourcePlayAtTimevSOFT") == 0) {
+        fn.alSourcePlayAtTimevSOFT = (void (*)(ALsizei, const ALuint *, ALint64SOFT)) lookup(g_handle, name);
+        if (!fn.alSourcePlayAtTimevSOFT) fn.alSourcePlayAtTimevSOFT = (void (*)(ALsizei, const ALuint *, ALint64SOFT)) resolve_optional(name, device);
+        return fn.alSourcePlayAtTimevSOFT != NULL;
+    }
+    if (strcmp(name, "alDebugMessageInsertEXT") == 0) {
+        fn.alDebugMessageInsertEXT = (void (*)(ALenum, ALenum, ALuint, ALenum, ALsizei, const ALchar *)) lookup(g_handle, name);
+        if (!fn.alDebugMessageInsertEXT) fn.alDebugMessageInsertEXT = (void (*)(ALenum, ALenum, ALuint, ALenum, ALsizei, const ALchar *)) resolve_optional(name, device);
+        return fn.alDebugMessageInsertEXT != NULL;
+    }
+    if (strcmp(name, "alDebugMessageControlEXT") == 0) {
+        fn.alDebugMessageControlEXT = (void (*)(ALenum, ALenum, ALenum, ALsizei, const ALuint *, ALboolean)) lookup(g_handle, name);
+        if (!fn.alDebugMessageControlEXT) fn.alDebugMessageControlEXT = (void (*)(ALenum, ALenum, ALenum, ALsizei, const ALuint *, ALboolean)) resolve_optional(name, device);
+        return fn.alDebugMessageControlEXT != NULL;
+    }
+    if (strcmp(name, "alPushDebugGroupEXT") == 0) {
+        fn.alPushDebugGroupEXT = (void (*)(ALenum, ALuint, ALsizei, const ALchar *)) lookup(g_handle, name);
+        if (!fn.alPushDebugGroupEXT) fn.alPushDebugGroupEXT = (void (*)(ALenum, ALuint, ALsizei, const ALchar *)) resolve_optional(name, device);
+        return fn.alPushDebugGroupEXT != NULL;
+    }
+    if (strcmp(name, "alPopDebugGroupEXT") == 0) {
+        fn.alPopDebugGroupEXT = (void (*)(void)) lookup(g_handle, name);
+        if (!fn.alPopDebugGroupEXT) fn.alPopDebugGroupEXT = (void (*)(void)) resolve_optional(name, device);
+        return fn.alPopDebugGroupEXT != NULL;
+    }
+    if (strcmp(name, "alGetDebugMessageLogEXT") == 0) {
+        fn.alGetDebugMessageLogEXT = (ALuint (*)(ALuint, ALsizei, ALenum *, ALenum *, ALuint *, ALenum *, ALsizei *, ALchar *)) lookup(g_handle, name);
+        if (!fn.alGetDebugMessageLogEXT) fn.alGetDebugMessageLogEXT = (ALuint (*)(ALuint, ALsizei, ALenum *, ALenum *, ALuint *, ALenum *, ALsizei *, ALchar *)) resolve_optional(name, device);
+        return fn.alGetDebugMessageLogEXT != NULL;
+    }
+    if (strcmp(name, "alObjectLabelEXT") == 0) {
+        fn.alObjectLabelEXT = (void (*)(ALenum, ALuint, ALsizei, const ALchar *)) lookup(g_handle, name);
+        if (!fn.alObjectLabelEXT) fn.alObjectLabelEXT = (void (*)(ALenum, ALuint, ALsizei, const ALchar *)) resolve_optional(name, device);
+        return fn.alObjectLabelEXT != NULL;
+    }
+    if (strcmp(name, "alGetObjectLabelEXT") == 0) {
+        fn.alGetObjectLabelEXT = (void (*)(ALenum, ALuint, ALsizei, ALsizei *, ALchar *)) lookup(g_handle, name);
+        if (!fn.alGetObjectLabelEXT) fn.alGetObjectLabelEXT = (void (*)(ALenum, ALuint, ALsizei, ALsizei *, ALchar *)) resolve_optional(name, device);
+        return fn.alGetObjectLabelEXT != NULL;
+    }
+    if (strcmp(name, "alGetPointerEXT") == 0) {
+        fn.alGetPointerEXT = (void* (*)(ALenum)) lookup(g_handle, name);
+        if (!fn.alGetPointerEXT) fn.alGetPointerEXT = (void* (*)(ALenum)) resolve_optional(name, device);
+        return fn.alGetPointerEXT != NULL;
+    }
+    if (strcmp(name, "alGetPointervEXT") == 0) {
+        fn.alGetPointervEXT = (void (*)(ALenum, void **)) lookup(g_handle, name);
+        if (!fn.alGetPointervEXT) fn.alGetPointervEXT = (void (*)(ALenum, void **)) resolve_optional(name, device);
+        return fn.alGetPointervEXT != NULL;
+    }
+    if (strcmp(name, "alEnableDirect") == 0) {
+        fn.alEnableDirect = (void (*)(ALCcontext *, ALenum)) lookup(g_handle, name);
+        if (!fn.alEnableDirect) fn.alEnableDirect = (void (*)(ALCcontext *, ALenum)) resolve_optional(name, device);
+        return fn.alEnableDirect != NULL;
+    }
+    if (strcmp(name, "alDisableDirect") == 0) {
+        fn.alDisableDirect = (void (*)(ALCcontext *, ALenum)) lookup(g_handle, name);
+        if (!fn.alDisableDirect) fn.alDisableDirect = (void (*)(ALCcontext *, ALenum)) resolve_optional(name, device);
+        return fn.alDisableDirect != NULL;
+    }
+    if (strcmp(name, "alIsEnabledDirect") == 0) {
+        fn.alIsEnabledDirect = (ALboolean (*)(ALCcontext *, ALenum)) lookup(g_handle, name);
+        if (!fn.alIsEnabledDirect) fn.alIsEnabledDirect = (ALboolean (*)(ALCcontext *, ALenum)) resolve_optional(name, device);
+        return fn.alIsEnabledDirect != NULL;
+    }
+    if (strcmp(name, "alDopplerFactorDirect") == 0) {
+        fn.alDopplerFactorDirect = (void (*)(ALCcontext *, ALfloat)) lookup(g_handle, name);
+        if (!fn.alDopplerFactorDirect) fn.alDopplerFactorDirect = (void (*)(ALCcontext *, ALfloat)) resolve_optional(name, device);
+        return fn.alDopplerFactorDirect != NULL;
+    }
+    if (strcmp(name, "alSpeedOfSoundDirect") == 0) {
+        fn.alSpeedOfSoundDirect = (void (*)(ALCcontext *, ALfloat)) lookup(g_handle, name);
+        if (!fn.alSpeedOfSoundDirect) fn.alSpeedOfSoundDirect = (void (*)(ALCcontext *, ALfloat)) resolve_optional(name, device);
+        return fn.alSpeedOfSoundDirect != NULL;
+    }
+    if (strcmp(name, "alDistanceModelDirect") == 0) {
+        fn.alDistanceModelDirect = (void (*)(ALCcontext *, ALenum)) lookup(g_handle, name);
+        if (!fn.alDistanceModelDirect) fn.alDistanceModelDirect = (void (*)(ALCcontext *, ALenum)) resolve_optional(name, device);
+        return fn.alDistanceModelDirect != NULL;
+    }
+    if (strcmp(name, "alGetStringDirect") == 0) {
+        fn.alGetStringDirect = (const ALchar * (*)(ALCcontext *, ALenum)) lookup(g_handle, name);
+        if (!fn.alGetStringDirect) fn.alGetStringDirect = (const ALchar * (*)(ALCcontext *, ALenum)) resolve_optional(name, device);
+        return fn.alGetStringDirect != NULL;
+    }
+    if (strcmp(name, "alGetBooleanvDirect") == 0) {
+        fn.alGetBooleanvDirect = (void (*)(ALCcontext *, ALenum, ALboolean *)) lookup(g_handle, name);
+        if (!fn.alGetBooleanvDirect) fn.alGetBooleanvDirect = (void (*)(ALCcontext *, ALenum, ALboolean *)) resolve_optional(name, device);
+        return fn.alGetBooleanvDirect != NULL;
+    }
+    if (strcmp(name, "alGetIntegervDirect") == 0) {
+        fn.alGetIntegervDirect = (void (*)(ALCcontext *, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetIntegervDirect) fn.alGetIntegervDirect = (void (*)(ALCcontext *, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetIntegervDirect != NULL;
+    }
+    if (strcmp(name, "alGetFloatvDirect") == 0) {
+        fn.alGetFloatvDirect = (void (*)(ALCcontext *, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetFloatvDirect) fn.alGetFloatvDirect = (void (*)(ALCcontext *, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetFloatvDirect != NULL;
+    }
+    if (strcmp(name, "alGetDoublevDirect") == 0) {
+        fn.alGetDoublevDirect = (void (*)(ALCcontext *, ALenum, ALdouble *)) lookup(g_handle, name);
+        if (!fn.alGetDoublevDirect) fn.alGetDoublevDirect = (void (*)(ALCcontext *, ALenum, ALdouble *)) resolve_optional(name, device);
+        return fn.alGetDoublevDirect != NULL;
+    }
+    if (strcmp(name, "alGetBooleanDirect") == 0) {
+        fn.alGetBooleanDirect = (ALboolean (*)(ALCcontext *, ALenum)) lookup(g_handle, name);
+        if (!fn.alGetBooleanDirect) fn.alGetBooleanDirect = (ALboolean (*)(ALCcontext *, ALenum)) resolve_optional(name, device);
+        return fn.alGetBooleanDirect != NULL;
+    }
+    if (strcmp(name, "alGetIntegerDirect") == 0) {
+        fn.alGetIntegerDirect = (ALint (*)(ALCcontext *, ALenum)) lookup(g_handle, name);
+        if (!fn.alGetIntegerDirect) fn.alGetIntegerDirect = (ALint (*)(ALCcontext *, ALenum)) resolve_optional(name, device);
+        return fn.alGetIntegerDirect != NULL;
+    }
+    if (strcmp(name, "alGetFloatDirect") == 0) {
+        fn.alGetFloatDirect = (ALfloat (*)(ALCcontext *, ALenum)) lookup(g_handle, name);
+        if (!fn.alGetFloatDirect) fn.alGetFloatDirect = (ALfloat (*)(ALCcontext *, ALenum)) resolve_optional(name, device);
+        return fn.alGetFloatDirect != NULL;
+    }
+    if (strcmp(name, "alGetDoubleDirect") == 0) {
+        fn.alGetDoubleDirect = (ALdouble (*)(ALCcontext *, ALenum)) lookup(g_handle, name);
+        if (!fn.alGetDoubleDirect) fn.alGetDoubleDirect = (ALdouble (*)(ALCcontext *, ALenum)) resolve_optional(name, device);
+        return fn.alGetDoubleDirect != NULL;
+    }
+    if (strcmp(name, "alGetErrorDirect") == 0) {
+        fn.alGetErrorDirect = (ALenum (*)(ALCcontext *)) lookup(g_handle, name);
+        if (!fn.alGetErrorDirect) fn.alGetErrorDirect = (ALenum (*)(ALCcontext *)) resolve_optional(name, device);
+        return fn.alGetErrorDirect != NULL;
+    }
+    if (strcmp(name, "alIsExtensionPresentDirect") == 0) {
+        fn.alIsExtensionPresentDirect = (ALboolean (*)(ALCcontext *, const ALchar *)) lookup(g_handle, name);
+        if (!fn.alIsExtensionPresentDirect) fn.alIsExtensionPresentDirect = (ALboolean (*)(ALCcontext *, const ALchar *)) resolve_optional(name, device);
+        return fn.alIsExtensionPresentDirect != NULL;
+    }
+    if (strcmp(name, "alGetProcAddressDirect") == 0) {
+        fn.alGetProcAddressDirect = (void* (*)(ALCcontext *, const ALchar *)) lookup(g_handle, name);
+        if (!fn.alGetProcAddressDirect) fn.alGetProcAddressDirect = (void* (*)(ALCcontext *, const ALchar *)) resolve_optional(name, device);
+        return fn.alGetProcAddressDirect != NULL;
+    }
+    if (strcmp(name, "alGetEnumValueDirect") == 0) {
+        fn.alGetEnumValueDirect = (ALenum (*)(ALCcontext *, const ALchar *)) lookup(g_handle, name);
+        if (!fn.alGetEnumValueDirect) fn.alGetEnumValueDirect = (ALenum (*)(ALCcontext *, const ALchar *)) resolve_optional(name, device);
+        return fn.alGetEnumValueDirect != NULL;
+    }
+    if (strcmp(name, "alListenerfDirect") == 0) {
+        fn.alListenerfDirect = (void (*)(ALCcontext *, ALenum, ALfloat)) lookup(g_handle, name);
+        if (!fn.alListenerfDirect) fn.alListenerfDirect = (void (*)(ALCcontext *, ALenum, ALfloat)) resolve_optional(name, device);
+        return fn.alListenerfDirect != NULL;
+    }
+    if (strcmp(name, "alListener3fDirect") == 0) {
+        fn.alListener3fDirect = (void (*)(ALCcontext *, ALenum, ALfloat, ALfloat, ALfloat)) lookup(g_handle, name);
+        if (!fn.alListener3fDirect) fn.alListener3fDirect = (void (*)(ALCcontext *, ALenum, ALfloat, ALfloat, ALfloat)) resolve_optional(name, device);
+        return fn.alListener3fDirect != NULL;
+    }
+    if (strcmp(name, "alListenerfvDirect") == 0) {
+        fn.alListenerfvDirect = (void (*)(ALCcontext *, ALenum, const ALfloat *)) lookup(g_handle, name);
+        if (!fn.alListenerfvDirect) fn.alListenerfvDirect = (void (*)(ALCcontext *, ALenum, const ALfloat *)) resolve_optional(name, device);
+        return fn.alListenerfvDirect != NULL;
+    }
+    if (strcmp(name, "alListeneriDirect") == 0) {
+        fn.alListeneriDirect = (void (*)(ALCcontext *, ALenum, ALint)) lookup(g_handle, name);
+        if (!fn.alListeneriDirect) fn.alListeneriDirect = (void (*)(ALCcontext *, ALenum, ALint)) resolve_optional(name, device);
+        return fn.alListeneriDirect != NULL;
+    }
+    if (strcmp(name, "alListener3iDirect") == 0) {
+        fn.alListener3iDirect = (void (*)(ALCcontext *, ALenum, ALint, ALint, ALint)) lookup(g_handle, name);
+        if (!fn.alListener3iDirect) fn.alListener3iDirect = (void (*)(ALCcontext *, ALenum, ALint, ALint, ALint)) resolve_optional(name, device);
+        return fn.alListener3iDirect != NULL;
+    }
+    if (strcmp(name, "alListenerivDirect") == 0) {
+        fn.alListenerivDirect = (void (*)(ALCcontext *, ALenum, const ALint *)) lookup(g_handle, name);
+        if (!fn.alListenerivDirect) fn.alListenerivDirect = (void (*)(ALCcontext *, ALenum, const ALint *)) resolve_optional(name, device);
+        return fn.alListenerivDirect != NULL;
+    }
+    if (strcmp(name, "alGetListenerfDirect") == 0) {
+        fn.alGetListenerfDirect = (void (*)(ALCcontext *, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetListenerfDirect) fn.alGetListenerfDirect = (void (*)(ALCcontext *, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetListenerfDirect != NULL;
+    }
+    if (strcmp(name, "alGetListener3fDirect") == 0) {
+        fn.alGetListener3fDirect = (void (*)(ALCcontext *, ALenum, ALfloat *, ALfloat *, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetListener3fDirect) fn.alGetListener3fDirect = (void (*)(ALCcontext *, ALenum, ALfloat *, ALfloat *, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetListener3fDirect != NULL;
+    }
+    if (strcmp(name, "alGetListenerfvDirect") == 0) {
+        fn.alGetListenerfvDirect = (void (*)(ALCcontext *, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetListenerfvDirect) fn.alGetListenerfvDirect = (void (*)(ALCcontext *, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetListenerfvDirect != NULL;
+    }
+    if (strcmp(name, "alGetListeneriDirect") == 0) {
+        fn.alGetListeneriDirect = (void (*)(ALCcontext *, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetListeneriDirect) fn.alGetListeneriDirect = (void (*)(ALCcontext *, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetListeneriDirect != NULL;
+    }
+    if (strcmp(name, "alGetListener3iDirect") == 0) {
+        fn.alGetListener3iDirect = (void (*)(ALCcontext *, ALenum, ALint *, ALint *, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetListener3iDirect) fn.alGetListener3iDirect = (void (*)(ALCcontext *, ALenum, ALint *, ALint *, ALint *)) resolve_optional(name, device);
+        return fn.alGetListener3iDirect != NULL;
+    }
+    if (strcmp(name, "alGetListenerivDirect") == 0) {
+        fn.alGetListenerivDirect = (void (*)(ALCcontext *, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetListenerivDirect) fn.alGetListenerivDirect = (void (*)(ALCcontext *, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetListenerivDirect != NULL;
+    }
+    if (strcmp(name, "alGenSourcesDirect") == 0) {
+        fn.alGenSourcesDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) lookup(g_handle, name);
+        if (!fn.alGenSourcesDirect) fn.alGenSourcesDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) resolve_optional(name, device);
+        return fn.alGenSourcesDirect != NULL;
+    }
+    if (strcmp(name, "alDeleteSourcesDirect") == 0) {
+        fn.alDeleteSourcesDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alDeleteSourcesDirect) fn.alDeleteSourcesDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alDeleteSourcesDirect != NULL;
+    }
+    if (strcmp(name, "alIsSourceDirect") == 0) {
+        fn.alIsSourceDirect = (ALboolean (*)(ALCcontext *, ALuint)) lookup(g_handle, name);
+        if (!fn.alIsSourceDirect) fn.alIsSourceDirect = (ALboolean (*)(ALCcontext *, ALuint)) resolve_optional(name, device);
+        return fn.alIsSourceDirect != NULL;
+    }
+    if (strcmp(name, "alSourcefDirect") == 0) {
+        fn.alSourcefDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) lookup(g_handle, name);
+        if (!fn.alSourcefDirect) fn.alSourcefDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) resolve_optional(name, device);
+        return fn.alSourcefDirect != NULL;
+    }
+    if (strcmp(name, "alSource3fDirect") == 0) {
+        fn.alSource3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat, ALfloat, ALfloat)) lookup(g_handle, name);
+        if (!fn.alSource3fDirect) fn.alSource3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat, ALfloat, ALfloat)) resolve_optional(name, device);
+        return fn.alSource3fDirect != NULL;
+    }
+    if (strcmp(name, "alSourcefvDirect") == 0) {
+        fn.alSourcefvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) lookup(g_handle, name);
+        if (!fn.alSourcefvDirect) fn.alSourcefvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) resolve_optional(name, device);
+        return fn.alSourcefvDirect != NULL;
+    }
+    if (strcmp(name, "alSourceiDirect") == 0) {
+        fn.alSourceiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) lookup(g_handle, name);
+        if (!fn.alSourceiDirect) fn.alSourceiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) resolve_optional(name, device);
+        return fn.alSourceiDirect != NULL;
+    }
+    if (strcmp(name, "alSource3iDirect") == 0) {
+        fn.alSource3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint, ALint, ALint)) lookup(g_handle, name);
+        if (!fn.alSource3iDirect) fn.alSource3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint, ALint, ALint)) resolve_optional(name, device);
+        return fn.alSource3iDirect != NULL;
+    }
+    if (strcmp(name, "alSourceivDirect") == 0) {
+        fn.alSourceivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) lookup(g_handle, name);
+        if (!fn.alSourceivDirect) fn.alSourceivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) resolve_optional(name, device);
+        return fn.alSourceivDirect != NULL;
+    }
+    if (strcmp(name, "alGetSourcefDirect") == 0) {
+        fn.alGetSourcefDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetSourcefDirect) fn.alGetSourcefDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetSourcefDirect != NULL;
+    }
+    if (strcmp(name, "alGetSource3fDirect") == 0) {
+        fn.alGetSource3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *, ALfloat *, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetSource3fDirect) fn.alGetSource3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *, ALfloat *, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetSource3fDirect != NULL;
+    }
+    if (strcmp(name, "alGetSourcefvDirect") == 0) {
+        fn.alGetSourcefvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetSourcefvDirect) fn.alGetSourcefvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetSourcefvDirect != NULL;
+    }
+    if (strcmp(name, "alGetSourceiDirect") == 0) {
+        fn.alGetSourceiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetSourceiDirect) fn.alGetSourceiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetSourceiDirect != NULL;
+    }
+    if (strcmp(name, "alGetSource3iDirect") == 0) {
+        fn.alGetSource3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *, ALint *, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetSource3iDirect) fn.alGetSource3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *, ALint *, ALint *)) resolve_optional(name, device);
+        return fn.alGetSource3iDirect != NULL;
+    }
+    if (strcmp(name, "alGetSourceivDirect") == 0) {
+        fn.alGetSourceivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetSourceivDirect) fn.alGetSourceivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetSourceivDirect != NULL;
+    }
+    if (strcmp(name, "alSourcePlayDirect") == 0) {
+        fn.alSourcePlayDirect = (void (*)(ALCcontext *, ALuint)) lookup(g_handle, name);
+        if (!fn.alSourcePlayDirect) fn.alSourcePlayDirect = (void (*)(ALCcontext *, ALuint)) resolve_optional(name, device);
+        return fn.alSourcePlayDirect != NULL;
+    }
+    if (strcmp(name, "alSourceStopDirect") == 0) {
+        fn.alSourceStopDirect = (void (*)(ALCcontext *, ALuint)) lookup(g_handle, name);
+        if (!fn.alSourceStopDirect) fn.alSourceStopDirect = (void (*)(ALCcontext *, ALuint)) resolve_optional(name, device);
+        return fn.alSourceStopDirect != NULL;
+    }
+    if (strcmp(name, "alSourceRewindDirect") == 0) {
+        fn.alSourceRewindDirect = (void (*)(ALCcontext *, ALuint)) lookup(g_handle, name);
+        if (!fn.alSourceRewindDirect) fn.alSourceRewindDirect = (void (*)(ALCcontext *, ALuint)) resolve_optional(name, device);
+        return fn.alSourceRewindDirect != NULL;
+    }
+    if (strcmp(name, "alSourcePauseDirect") == 0) {
+        fn.alSourcePauseDirect = (void (*)(ALCcontext *, ALuint)) lookup(g_handle, name);
+        if (!fn.alSourcePauseDirect) fn.alSourcePauseDirect = (void (*)(ALCcontext *, ALuint)) resolve_optional(name, device);
+        return fn.alSourcePauseDirect != NULL;
+    }
+    if (strcmp(name, "alSourcePlayvDirect") == 0) {
+        fn.alSourcePlayvDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alSourcePlayvDirect) fn.alSourcePlayvDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alSourcePlayvDirect != NULL;
+    }
+    if (strcmp(name, "alSourceStopvDirect") == 0) {
+        fn.alSourceStopvDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alSourceStopvDirect) fn.alSourceStopvDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alSourceStopvDirect != NULL;
+    }
+    if (strcmp(name, "alSourceRewindvDirect") == 0) {
+        fn.alSourceRewindvDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alSourceRewindvDirect) fn.alSourceRewindvDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alSourceRewindvDirect != NULL;
+    }
+    if (strcmp(name, "alSourcePausevDirect") == 0) {
+        fn.alSourcePausevDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alSourcePausevDirect) fn.alSourcePausevDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alSourcePausevDirect != NULL;
+    }
+    if (strcmp(name, "alSourceQueueBuffersDirect") == 0) {
+        fn.alSourceQueueBuffersDirect = (void (*)(ALCcontext *, ALuint, ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alSourceQueueBuffersDirect) fn.alSourceQueueBuffersDirect = (void (*)(ALCcontext *, ALuint, ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alSourceQueueBuffersDirect != NULL;
+    }
+    if (strcmp(name, "alSourceUnqueueBuffersDirect") == 0) {
+        fn.alSourceUnqueueBuffersDirect = (void (*)(ALCcontext *, ALuint, ALsizei, ALuint *)) lookup(g_handle, name);
+        if (!fn.alSourceUnqueueBuffersDirect) fn.alSourceUnqueueBuffersDirect = (void (*)(ALCcontext *, ALuint, ALsizei, ALuint *)) resolve_optional(name, device);
+        return fn.alSourceUnqueueBuffersDirect != NULL;
+    }
+    if (strcmp(name, "alGenBuffersDirect") == 0) {
+        fn.alGenBuffersDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) lookup(g_handle, name);
+        if (!fn.alGenBuffersDirect) fn.alGenBuffersDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) resolve_optional(name, device);
+        return fn.alGenBuffersDirect != NULL;
+    }
+    if (strcmp(name, "alDeleteBuffersDirect") == 0) {
+        fn.alDeleteBuffersDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alDeleteBuffersDirect) fn.alDeleteBuffersDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alDeleteBuffersDirect != NULL;
+    }
+    if (strcmp(name, "alIsBufferDirect") == 0) {
+        fn.alIsBufferDirect = (ALboolean (*)(ALCcontext *, ALuint)) lookup(g_handle, name);
+        if (!fn.alIsBufferDirect) fn.alIsBufferDirect = (ALboolean (*)(ALCcontext *, ALuint)) resolve_optional(name, device);
+        return fn.alIsBufferDirect != NULL;
+    }
+    if (strcmp(name, "alBufferDataDirect") == 0) {
+        fn.alBufferDataDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) lookup(g_handle, name);
+        if (!fn.alBufferDataDirect) fn.alBufferDataDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) resolve_optional(name, device);
+        return fn.alBufferDataDirect != NULL;
+    }
+    if (strcmp(name, "alBufferfDirect") == 0) {
+        fn.alBufferfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) lookup(g_handle, name);
+        if (!fn.alBufferfDirect) fn.alBufferfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) resolve_optional(name, device);
+        return fn.alBufferfDirect != NULL;
+    }
+    if (strcmp(name, "alBuffer3fDirect") == 0) {
+        fn.alBuffer3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat, ALfloat, ALfloat)) lookup(g_handle, name);
+        if (!fn.alBuffer3fDirect) fn.alBuffer3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat, ALfloat, ALfloat)) resolve_optional(name, device);
+        return fn.alBuffer3fDirect != NULL;
+    }
+    if (strcmp(name, "alBufferfvDirect") == 0) {
+        fn.alBufferfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) lookup(g_handle, name);
+        if (!fn.alBufferfvDirect) fn.alBufferfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) resolve_optional(name, device);
+        return fn.alBufferfvDirect != NULL;
+    }
+    if (strcmp(name, "alBufferiDirect") == 0) {
+        fn.alBufferiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) lookup(g_handle, name);
+        if (!fn.alBufferiDirect) fn.alBufferiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) resolve_optional(name, device);
+        return fn.alBufferiDirect != NULL;
+    }
+    if (strcmp(name, "alBuffer3iDirect") == 0) {
+        fn.alBuffer3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint, ALint, ALint)) lookup(g_handle, name);
+        if (!fn.alBuffer3iDirect) fn.alBuffer3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint, ALint, ALint)) resolve_optional(name, device);
+        return fn.alBuffer3iDirect != NULL;
+    }
+    if (strcmp(name, "alBufferivDirect") == 0) {
+        fn.alBufferivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) lookup(g_handle, name);
+        if (!fn.alBufferivDirect) fn.alBufferivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) resolve_optional(name, device);
+        return fn.alBufferivDirect != NULL;
+    }
+    if (strcmp(name, "alGetBufferfDirect") == 0) {
+        fn.alGetBufferfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetBufferfDirect) fn.alGetBufferfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetBufferfDirect != NULL;
+    }
+    if (strcmp(name, "alGetBuffer3fDirect") == 0) {
+        fn.alGetBuffer3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *, ALfloat *, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetBuffer3fDirect) fn.alGetBuffer3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *, ALfloat *, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetBuffer3fDirect != NULL;
+    }
+    if (strcmp(name, "alGetBufferfvDirect") == 0) {
+        fn.alGetBufferfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetBufferfvDirect) fn.alGetBufferfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetBufferfvDirect != NULL;
+    }
+    if (strcmp(name, "alGetBufferiDirect") == 0) {
+        fn.alGetBufferiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetBufferiDirect) fn.alGetBufferiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetBufferiDirect != NULL;
+    }
+    if (strcmp(name, "alGetBuffer3iDirect") == 0) {
+        fn.alGetBuffer3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *, ALint *, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetBuffer3iDirect) fn.alGetBuffer3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *, ALint *, ALint *)) resolve_optional(name, device);
+        return fn.alGetBuffer3iDirect != NULL;
+    }
+    if (strcmp(name, "alGetBufferivDirect") == 0) {
+        fn.alGetBufferivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetBufferivDirect) fn.alGetBufferivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetBufferivDirect != NULL;
+    }
+    if (strcmp(name, "alGenEffectsDirect") == 0) {
+        fn.alGenEffectsDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) lookup(g_handle, name);
+        if (!fn.alGenEffectsDirect) fn.alGenEffectsDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) resolve_optional(name, device);
+        return fn.alGenEffectsDirect != NULL;
+    }
+    if (strcmp(name, "alDeleteEffectsDirect") == 0) {
+        fn.alDeleteEffectsDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alDeleteEffectsDirect) fn.alDeleteEffectsDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alDeleteEffectsDirect != NULL;
+    }
+    if (strcmp(name, "alIsEffectDirect") == 0) {
+        fn.alIsEffectDirect = (ALboolean (*)(ALCcontext *, ALuint)) lookup(g_handle, name);
+        if (!fn.alIsEffectDirect) fn.alIsEffectDirect = (ALboolean (*)(ALCcontext *, ALuint)) resolve_optional(name, device);
+        return fn.alIsEffectDirect != NULL;
+    }
+    if (strcmp(name, "alEffectiDirect") == 0) {
+        fn.alEffectiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) lookup(g_handle, name);
+        if (!fn.alEffectiDirect) fn.alEffectiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) resolve_optional(name, device);
+        return fn.alEffectiDirect != NULL;
+    }
+    if (strcmp(name, "alEffectivDirect") == 0) {
+        fn.alEffectivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) lookup(g_handle, name);
+        if (!fn.alEffectivDirect) fn.alEffectivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) resolve_optional(name, device);
+        return fn.alEffectivDirect != NULL;
+    }
+    if (strcmp(name, "alEffectfDirect") == 0) {
+        fn.alEffectfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) lookup(g_handle, name);
+        if (!fn.alEffectfDirect) fn.alEffectfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) resolve_optional(name, device);
+        return fn.alEffectfDirect != NULL;
+    }
+    if (strcmp(name, "alEffectfvDirect") == 0) {
+        fn.alEffectfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) lookup(g_handle, name);
+        if (!fn.alEffectfvDirect) fn.alEffectfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) resolve_optional(name, device);
+        return fn.alEffectfvDirect != NULL;
+    }
+    if (strcmp(name, "alGetEffectiDirect") == 0) {
+        fn.alGetEffectiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetEffectiDirect) fn.alGetEffectiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetEffectiDirect != NULL;
+    }
+    if (strcmp(name, "alGetEffectivDirect") == 0) {
+        fn.alGetEffectivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetEffectivDirect) fn.alGetEffectivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetEffectivDirect != NULL;
+    }
+    if (strcmp(name, "alGetEffectfDirect") == 0) {
+        fn.alGetEffectfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetEffectfDirect) fn.alGetEffectfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetEffectfDirect != NULL;
+    }
+    if (strcmp(name, "alGetEffectfvDirect") == 0) {
+        fn.alGetEffectfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetEffectfvDirect) fn.alGetEffectfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetEffectfvDirect != NULL;
+    }
+    if (strcmp(name, "alGenFiltersDirect") == 0) {
+        fn.alGenFiltersDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) lookup(g_handle, name);
+        if (!fn.alGenFiltersDirect) fn.alGenFiltersDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) resolve_optional(name, device);
+        return fn.alGenFiltersDirect != NULL;
+    }
+    if (strcmp(name, "alDeleteFiltersDirect") == 0) {
+        fn.alDeleteFiltersDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alDeleteFiltersDirect) fn.alDeleteFiltersDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alDeleteFiltersDirect != NULL;
+    }
+    if (strcmp(name, "alIsFilterDirect") == 0) {
+        fn.alIsFilterDirect = (ALboolean (*)(ALCcontext *, ALuint)) lookup(g_handle, name);
+        if (!fn.alIsFilterDirect) fn.alIsFilterDirect = (ALboolean (*)(ALCcontext *, ALuint)) resolve_optional(name, device);
+        return fn.alIsFilterDirect != NULL;
+    }
+    if (strcmp(name, "alFilteriDirect") == 0) {
+        fn.alFilteriDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) lookup(g_handle, name);
+        if (!fn.alFilteriDirect) fn.alFilteriDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) resolve_optional(name, device);
+        return fn.alFilteriDirect != NULL;
+    }
+    if (strcmp(name, "alFilterivDirect") == 0) {
+        fn.alFilterivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) lookup(g_handle, name);
+        if (!fn.alFilterivDirect) fn.alFilterivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) resolve_optional(name, device);
+        return fn.alFilterivDirect != NULL;
+    }
+    if (strcmp(name, "alFilterfDirect") == 0) {
+        fn.alFilterfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) lookup(g_handle, name);
+        if (!fn.alFilterfDirect) fn.alFilterfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) resolve_optional(name, device);
+        return fn.alFilterfDirect != NULL;
+    }
+    if (strcmp(name, "alFilterfvDirect") == 0) {
+        fn.alFilterfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) lookup(g_handle, name);
+        if (!fn.alFilterfvDirect) fn.alFilterfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) resolve_optional(name, device);
+        return fn.alFilterfvDirect != NULL;
+    }
+    if (strcmp(name, "alGetFilteriDirect") == 0) {
+        fn.alGetFilteriDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetFilteriDirect) fn.alGetFilteriDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetFilteriDirect != NULL;
+    }
+    if (strcmp(name, "alGetFilterivDirect") == 0) {
+        fn.alGetFilterivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetFilterivDirect) fn.alGetFilterivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetFilterivDirect != NULL;
+    }
+    if (strcmp(name, "alGetFilterfDirect") == 0) {
+        fn.alGetFilterfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetFilterfDirect) fn.alGetFilterfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetFilterfDirect != NULL;
+    }
+    if (strcmp(name, "alGetFilterfvDirect") == 0) {
+        fn.alGetFilterfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetFilterfvDirect) fn.alGetFilterfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetFilterfvDirect != NULL;
+    }
+    if (strcmp(name, "alGenAuxiliaryEffectSlotsDirect") == 0) {
+        fn.alGenAuxiliaryEffectSlotsDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) lookup(g_handle, name);
+        if (!fn.alGenAuxiliaryEffectSlotsDirect) fn.alGenAuxiliaryEffectSlotsDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) resolve_optional(name, device);
+        return fn.alGenAuxiliaryEffectSlotsDirect != NULL;
+    }
+    if (strcmp(name, "alDeleteAuxiliaryEffectSlotsDirect") == 0) {
+        fn.alDeleteAuxiliaryEffectSlotsDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(g_handle, name);
+        if (!fn.alDeleteAuxiliaryEffectSlotsDirect) fn.alDeleteAuxiliaryEffectSlotsDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) resolve_optional(name, device);
+        return fn.alDeleteAuxiliaryEffectSlotsDirect != NULL;
+    }
+    if (strcmp(name, "alIsAuxiliaryEffectSlotDirect") == 0) {
+        fn.alIsAuxiliaryEffectSlotDirect = (ALboolean (*)(ALCcontext *, ALuint)) lookup(g_handle, name);
+        if (!fn.alIsAuxiliaryEffectSlotDirect) fn.alIsAuxiliaryEffectSlotDirect = (ALboolean (*)(ALCcontext *, ALuint)) resolve_optional(name, device);
+        return fn.alIsAuxiliaryEffectSlotDirect != NULL;
+    }
+    if (strcmp(name, "alAuxiliaryEffectSlotiDirect") == 0) {
+        fn.alAuxiliaryEffectSlotiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) lookup(g_handle, name);
+        if (!fn.alAuxiliaryEffectSlotiDirect) fn.alAuxiliaryEffectSlotiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) resolve_optional(name, device);
+        return fn.alAuxiliaryEffectSlotiDirect != NULL;
+    }
+    if (strcmp(name, "alAuxiliaryEffectSlotivDirect") == 0) {
+        fn.alAuxiliaryEffectSlotivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) lookup(g_handle, name);
+        if (!fn.alAuxiliaryEffectSlotivDirect) fn.alAuxiliaryEffectSlotivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) resolve_optional(name, device);
+        return fn.alAuxiliaryEffectSlotivDirect != NULL;
+    }
+    if (strcmp(name, "alAuxiliaryEffectSlotfDirect") == 0) {
+        fn.alAuxiliaryEffectSlotfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) lookup(g_handle, name);
+        if (!fn.alAuxiliaryEffectSlotfDirect) fn.alAuxiliaryEffectSlotfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) resolve_optional(name, device);
+        return fn.alAuxiliaryEffectSlotfDirect != NULL;
+    }
+    if (strcmp(name, "alAuxiliaryEffectSlotfvDirect") == 0) {
+        fn.alAuxiliaryEffectSlotfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) lookup(g_handle, name);
+        if (!fn.alAuxiliaryEffectSlotfvDirect) fn.alAuxiliaryEffectSlotfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) resolve_optional(name, device);
+        return fn.alAuxiliaryEffectSlotfvDirect != NULL;
+    }
+    if (strcmp(name, "alGetAuxiliaryEffectSlotiDirect") == 0) {
+        fn.alGetAuxiliaryEffectSlotiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetAuxiliaryEffectSlotiDirect) fn.alGetAuxiliaryEffectSlotiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetAuxiliaryEffectSlotiDirect != NULL;
+    }
+    if (strcmp(name, "alGetAuxiliaryEffectSlotivDirect") == 0) {
+        fn.alGetAuxiliaryEffectSlotivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(g_handle, name);
+        if (!fn.alGetAuxiliaryEffectSlotivDirect) fn.alGetAuxiliaryEffectSlotivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) resolve_optional(name, device);
+        return fn.alGetAuxiliaryEffectSlotivDirect != NULL;
+    }
+    if (strcmp(name, "alGetAuxiliaryEffectSlotfDirect") == 0) {
+        fn.alGetAuxiliaryEffectSlotfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetAuxiliaryEffectSlotfDirect) fn.alGetAuxiliaryEffectSlotfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetAuxiliaryEffectSlotfDirect != NULL;
+    }
+    if (strcmp(name, "alGetAuxiliaryEffectSlotfvDirect") == 0) {
+        fn.alGetAuxiliaryEffectSlotfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(g_handle, name);
+        if (!fn.alGetAuxiliaryEffectSlotfvDirect) fn.alGetAuxiliaryEffectSlotfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) resolve_optional(name, device);
+        return fn.alGetAuxiliaryEffectSlotfvDirect != NULL;
+    }
+    if (strcmp(name, "alBufferDataStaticDirect") == 0) {
+        fn.alBufferDataStaticDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid *, ALsizei, ALsizei)) lookup(g_handle, name);
+        if (!fn.alBufferDataStaticDirect) fn.alBufferDataStaticDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid *, ALsizei, ALsizei)) resolve_optional(name, device);
+        return fn.alBufferDataStaticDirect != NULL;
+    }
+    if (strcmp(name, "alDebugMessageInsertDirectEXT") == 0) {
+        fn.alDebugMessageInsertDirectEXT = (void (*)(ALCcontext *, ALenum, ALenum, ALuint, ALenum, ALsizei, const ALchar *)) lookup(g_handle, name);
+        if (!fn.alDebugMessageInsertDirectEXT) fn.alDebugMessageInsertDirectEXT = (void (*)(ALCcontext *, ALenum, ALenum, ALuint, ALenum, ALsizei, const ALchar *)) resolve_optional(name, device);
+        return fn.alDebugMessageInsertDirectEXT != NULL;
+    }
+    if (strcmp(name, "alDebugMessageControlDirectEXT") == 0) {
+        fn.alDebugMessageControlDirectEXT = (void (*)(ALCcontext *, ALenum, ALenum, ALenum, ALsizei, const ALuint *, ALboolean)) lookup(g_handle, name);
+        if (!fn.alDebugMessageControlDirectEXT) fn.alDebugMessageControlDirectEXT = (void (*)(ALCcontext *, ALenum, ALenum, ALenum, ALsizei, const ALuint *, ALboolean)) resolve_optional(name, device);
+        return fn.alDebugMessageControlDirectEXT != NULL;
+    }
+    if (strcmp(name, "alPushDebugGroupDirectEXT") == 0) {
+        fn.alPushDebugGroupDirectEXT = (void (*)(ALCcontext *, ALenum, ALuint, ALsizei, const ALchar *)) lookup(g_handle, name);
+        if (!fn.alPushDebugGroupDirectEXT) fn.alPushDebugGroupDirectEXT = (void (*)(ALCcontext *, ALenum, ALuint, ALsizei, const ALchar *)) resolve_optional(name, device);
+        return fn.alPushDebugGroupDirectEXT != NULL;
+    }
+    if (strcmp(name, "alPopDebugGroupDirectEXT") == 0) {
+        fn.alPopDebugGroupDirectEXT = (void (*)(ALCcontext *)) lookup(g_handle, name);
+        if (!fn.alPopDebugGroupDirectEXT) fn.alPopDebugGroupDirectEXT = (void (*)(ALCcontext *)) resolve_optional(name, device);
+        return fn.alPopDebugGroupDirectEXT != NULL;
+    }
+    if (strcmp(name, "alGetDebugMessageLogDirectEXT") == 0) {
+        fn.alGetDebugMessageLogDirectEXT = (ALuint (*)(ALCcontext *, ALuint, ALsizei, ALenum *, ALenum *, ALuint *, ALenum *, ALsizei *, ALchar *)) lookup(g_handle, name);
+        if (!fn.alGetDebugMessageLogDirectEXT) fn.alGetDebugMessageLogDirectEXT = (ALuint (*)(ALCcontext *, ALuint, ALsizei, ALenum *, ALenum *, ALuint *, ALenum *, ALsizei *, ALchar *)) resolve_optional(name, device);
+        return fn.alGetDebugMessageLogDirectEXT != NULL;
+    }
+    if (strcmp(name, "alObjectLabelDirectEXT") == 0) {
+        fn.alObjectLabelDirectEXT = (void (*)(ALCcontext *, ALenum, ALuint, ALsizei, const ALchar *)) lookup(g_handle, name);
+        if (!fn.alObjectLabelDirectEXT) fn.alObjectLabelDirectEXT = (void (*)(ALCcontext *, ALenum, ALuint, ALsizei, const ALchar *)) resolve_optional(name, device);
+        return fn.alObjectLabelDirectEXT != NULL;
+    }
+    if (strcmp(name, "alGetObjectLabelDirectEXT") == 0) {
+        fn.alGetObjectLabelDirectEXT = (void (*)(ALCcontext *, ALenum, ALuint, ALsizei, ALsizei *, ALchar *)) lookup(g_handle, name);
+        if (!fn.alGetObjectLabelDirectEXT) fn.alGetObjectLabelDirectEXT = (void (*)(ALCcontext *, ALenum, ALuint, ALsizei, ALsizei *, ALchar *)) resolve_optional(name, device);
+        return fn.alGetObjectLabelDirectEXT != NULL;
+    }
+    if (strcmp(name, "alGetPointerDirectEXT") == 0) {
+        fn.alGetPointerDirectEXT = (void* (*)(ALCcontext *, ALenum)) lookup(g_handle, name);
+        if (!fn.alGetPointerDirectEXT) fn.alGetPointerDirectEXT = (void* (*)(ALCcontext *, ALenum)) resolve_optional(name, device);
+        return fn.alGetPointerDirectEXT != NULL;
+    }
+    if (strcmp(name, "alGetPointervDirectEXT") == 0) {
+        fn.alGetPointervDirectEXT = (void (*)(ALCcontext *, ALenum, void **)) lookup(g_handle, name);
+        if (!fn.alGetPointervDirectEXT) fn.alGetPointervDirectEXT = (void (*)(ALCcontext *, ALenum, void **)) resolve_optional(name, device);
+        return fn.alGetPointervDirectEXT != NULL;
+    }
+    if (strcmp(name, "alRequestFoldbackStopDirect") == 0) {
+        fn.alRequestFoldbackStopDirect = (void (*)(ALCcontext *)) lookup(g_handle, name);
+        if (!fn.alRequestFoldbackStopDirect) fn.alRequestFoldbackStopDirect = (void (*)(ALCcontext *)) resolve_optional(name, device);
+        return fn.alRequestFoldbackStopDirect != NULL;
+    }
+    if (strcmp(name, "alBufferSubDataDirectSOFT") == 0) {
+        fn.alBufferSubDataDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) lookup(g_handle, name);
+        if (!fn.alBufferSubDataDirectSOFT) fn.alBufferSubDataDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) resolve_optional(name, device);
+        return fn.alBufferSubDataDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alSourcedDirectSOFT") == 0) {
+        fn.alSourcedDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble)) lookup(g_handle, name);
+        if (!fn.alSourcedDirectSOFT) fn.alSourcedDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble)) resolve_optional(name, device);
+        return fn.alSourcedDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alSource3dDirectSOFT") == 0) {
+        fn.alSource3dDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble, ALdouble, ALdouble)) lookup(g_handle, name);
+        if (!fn.alSource3dDirectSOFT) fn.alSource3dDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble, ALdouble, ALdouble)) resolve_optional(name, device);
+        return fn.alSource3dDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alSourcedvDirectSOFT") == 0) {
+        fn.alSourcedvDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, const ALdouble *)) lookup(g_handle, name);
+        if (!fn.alSourcedvDirectSOFT) fn.alSourcedvDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, const ALdouble *)) resolve_optional(name, device);
+        return fn.alSourcedvDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alGetSourcedDirectSOFT") == 0) {
+        fn.alGetSourcedDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble *)) lookup(g_handle, name);
+        if (!fn.alGetSourcedDirectSOFT) fn.alGetSourcedDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble *)) resolve_optional(name, device);
+        return fn.alGetSourcedDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alGetSource3dDirectSOFT") == 0) {
+        fn.alGetSource3dDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble *, ALdouble *, ALdouble *)) lookup(g_handle, name);
+        if (!fn.alGetSource3dDirectSOFT) fn.alGetSource3dDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble *, ALdouble *, ALdouble *)) resolve_optional(name, device);
+        return fn.alGetSource3dDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alGetSourcedvDirectSOFT") == 0) {
+        fn.alGetSourcedvDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble *)) lookup(g_handle, name);
+        if (!fn.alGetSourcedvDirectSOFT) fn.alGetSourcedvDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble *)) resolve_optional(name, device);
+        return fn.alGetSourcedvDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alSourcei64DirectSOFT") == 0) {
+        fn.alSourcei64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT)) lookup(g_handle, name);
+        if (!fn.alSourcei64DirectSOFT) fn.alSourcei64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT)) resolve_optional(name, device);
+        return fn.alSourcei64DirectSOFT != NULL;
+    }
+    if (strcmp(name, "alSource3i64DirectSOFT") == 0) {
+        fn.alSource3i64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT, ALint64SOFT, ALint64SOFT)) lookup(g_handle, name);
+        if (!fn.alSource3i64DirectSOFT) fn.alSource3i64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT, ALint64SOFT, ALint64SOFT)) resolve_optional(name, device);
+        return fn.alSource3i64DirectSOFT != NULL;
+    }
+    if (strcmp(name, "alSourcei64vDirectSOFT") == 0) {
+        fn.alSourcei64vDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, const ALint64SOFT *)) lookup(g_handle, name);
+        if (!fn.alSourcei64vDirectSOFT) fn.alSourcei64vDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, const ALint64SOFT *)) resolve_optional(name, device);
+        return fn.alSourcei64vDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alGetSourcei64DirectSOFT") == 0) {
+        fn.alGetSourcei64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT *)) lookup(g_handle, name);
+        if (!fn.alGetSourcei64DirectSOFT) fn.alGetSourcei64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT *)) resolve_optional(name, device);
+        return fn.alGetSourcei64DirectSOFT != NULL;
+    }
+    if (strcmp(name, "alGetSource3i64DirectSOFT") == 0) {
+        fn.alGetSource3i64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT *, ALint64SOFT *, ALint64SOFT *)) lookup(g_handle, name);
+        if (!fn.alGetSource3i64DirectSOFT) fn.alGetSource3i64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT *, ALint64SOFT *, ALint64SOFT *)) resolve_optional(name, device);
+        return fn.alGetSource3i64DirectSOFT != NULL;
+    }
+    if (strcmp(name, "alGetSourcei64vDirectSOFT") == 0) {
+        fn.alGetSourcei64vDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT *)) lookup(g_handle, name);
+        if (!fn.alGetSourcei64vDirectSOFT) fn.alGetSourcei64vDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT *)) resolve_optional(name, device);
+        return fn.alGetSourcei64vDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alDeferUpdatesDirectSOFT") == 0) {
+        fn.alDeferUpdatesDirectSOFT = (void (*)(ALCcontext *)) lookup(g_handle, name);
+        if (!fn.alDeferUpdatesDirectSOFT) fn.alDeferUpdatesDirectSOFT = (void (*)(ALCcontext *)) resolve_optional(name, device);
+        return fn.alDeferUpdatesDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alProcessUpdatesDirectSOFT") == 0) {
+        fn.alProcessUpdatesDirectSOFT = (void (*)(ALCcontext *)) lookup(g_handle, name);
+        if (!fn.alProcessUpdatesDirectSOFT) fn.alProcessUpdatesDirectSOFT = (void (*)(ALCcontext *)) resolve_optional(name, device);
+        return fn.alProcessUpdatesDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alGetStringiDirectSOFT") == 0) {
+        fn.alGetStringiDirectSOFT = (const ALchar * (*)(ALCcontext *, ALenum, ALsizei)) lookup(g_handle, name);
+        if (!fn.alGetStringiDirectSOFT) fn.alGetStringiDirectSOFT = (const ALchar * (*)(ALCcontext *, ALenum, ALsizei)) resolve_optional(name, device);
+        return fn.alGetStringiDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alEventControlDirectSOFT") == 0) {
+        fn.alEventControlDirectSOFT = (void (*)(ALCcontext *, ALsizei, const ALenum *, ALboolean)) lookup(g_handle, name);
+        if (!fn.alEventControlDirectSOFT) fn.alEventControlDirectSOFT = (void (*)(ALCcontext *, ALsizei, const ALenum *, ALboolean)) resolve_optional(name, device);
+        return fn.alEventControlDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alGetPointerDirectSOFT") == 0) {
+        fn.alGetPointerDirectSOFT = (void* (*)(ALCcontext *, ALenum)) lookup(g_handle, name);
+        if (!fn.alGetPointerDirectSOFT) fn.alGetPointerDirectSOFT = (void* (*)(ALCcontext *, ALenum)) resolve_optional(name, device);
+        return fn.alGetPointerDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alGetPointervDirectSOFT") == 0) {
+        fn.alGetPointervDirectSOFT = (void (*)(ALCcontext *, ALenum, void **)) lookup(g_handle, name);
+        if (!fn.alGetPointervDirectSOFT) fn.alGetPointervDirectSOFT = (void (*)(ALCcontext *, ALenum, void **)) resolve_optional(name, device);
+        return fn.alGetPointervDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alGetBufferPtrDirectSOFT") == 0) {
+        fn.alGetBufferPtrDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid **)) lookup(g_handle, name);
+        if (!fn.alGetBufferPtrDirectSOFT) fn.alGetBufferPtrDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid **)) resolve_optional(name, device);
+        return fn.alGetBufferPtrDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alGetBuffer3PtrDirectSOFT") == 0) {
+        fn.alGetBuffer3PtrDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid **, ALvoid **, ALvoid **)) lookup(g_handle, name);
+        if (!fn.alGetBuffer3PtrDirectSOFT) fn.alGetBuffer3PtrDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid **, ALvoid **, ALvoid **)) resolve_optional(name, device);
+        return fn.alGetBuffer3PtrDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alGetBufferPtrvDirectSOFT") == 0) {
+        fn.alGetBufferPtrvDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid **)) lookup(g_handle, name);
+        if (!fn.alGetBufferPtrvDirectSOFT) fn.alGetBufferPtrvDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid **)) resolve_optional(name, device);
+        return fn.alGetBufferPtrvDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alSourcePlayAtTimeDirectSOFT") == 0) {
+        fn.alSourcePlayAtTimeDirectSOFT = (void (*)(ALCcontext *, ALuint, ALint64SOFT)) lookup(g_handle, name);
+        if (!fn.alSourcePlayAtTimeDirectSOFT) fn.alSourcePlayAtTimeDirectSOFT = (void (*)(ALCcontext *, ALuint, ALint64SOFT)) resolve_optional(name, device);
+        return fn.alSourcePlayAtTimeDirectSOFT != NULL;
+    }
+    if (strcmp(name, "alSourcePlayAtTimevDirectSOFT") == 0) {
+        fn.alSourcePlayAtTimevDirectSOFT = (void (*)(ALCcontext *, ALsizei, const ALuint *, ALint64SOFT)) lookup(g_handle, name);
+        if (!fn.alSourcePlayAtTimevDirectSOFT) fn.alSourcePlayAtTimevDirectSOFT = (void (*)(ALCcontext *, ALsizei, const ALuint *, ALint64SOFT)) resolve_optional(name, device);
+        return fn.alSourcePlayAtTimevDirectSOFT != NULL;
+    }
+    if (strcmp(name, "EAXSetDirect") == 0) {
+        fn.EAXSetDirect = (ALenum (*)(ALCcontext *, const struct _GUID *, ALuint, ALuint, ALvoid *, ALuint)) lookup(g_handle, name);
+        if (!fn.EAXSetDirect) fn.EAXSetDirect = (ALenum (*)(ALCcontext *, const struct _GUID *, ALuint, ALuint, ALvoid *, ALuint)) resolve_optional(name, device);
+        return fn.EAXSetDirect != NULL;
+    }
+    if (strcmp(name, "EAXGetDirect") == 0) {
+        fn.EAXGetDirect = (ALenum (*)(ALCcontext *, const struct _GUID *, ALuint, ALuint, ALvoid *, ALuint)) lookup(g_handle, name);
+        if (!fn.EAXGetDirect) fn.EAXGetDirect = (ALenum (*)(ALCcontext *, const struct _GUID *, ALuint, ALuint, ALvoid *, ALuint)) resolve_optional(name, device);
+        return fn.EAXGetDirect != NULL;
+    }
+    if (strcmp(name, "EAXSetBufferModeDirect") == 0) {
+        fn.EAXSetBufferModeDirect = (ALboolean (*)(ALCcontext *, ALsizei, const ALuint *, ALint)) lookup(g_handle, name);
+        if (!fn.EAXSetBufferModeDirect) fn.EAXSetBufferModeDirect = (ALboolean (*)(ALCcontext *, ALsizei, const ALuint *, ALint)) resolve_optional(name, device);
+        return fn.EAXSetBufferModeDirect != NULL;
+    }
+    if (strcmp(name, "EAXGetBufferModeDirect") == 0) {
+        fn.EAXGetBufferModeDirect = (ALenum (*)(ALCcontext *, ALuint, ALint *)) lookup(g_handle, name);
+        if (!fn.EAXGetBufferModeDirect) fn.EAXGetBufferModeDirect = (ALenum (*)(ALCcontext *, ALuint, ALint *)) resolve_optional(name, device);
+        return fn.EAXGetBufferModeDirect != NULL;
+    }
+    if (strcmp(name, "alcLoopbackOpenDeviceSOFT") == 0) {
+        fn.alcLoopbackOpenDeviceSOFT = (ALCdevice * (*)(const ALCchar *)) lookup(g_handle, name);
+        if (!fn.alcLoopbackOpenDeviceSOFT) fn.alcLoopbackOpenDeviceSOFT = (ALCdevice * (*)(const ALCchar *)) resolve_optional(name, device);
+        return fn.alcLoopbackOpenDeviceSOFT != NULL;
+    }
+    if (strcmp(name, "alcIsRenderFormatSupportedSOFT") == 0) {
+        fn.alcIsRenderFormatSupportedSOFT = (ALCboolean (*)(ALCdevice *, ALCsizei, ALCenum, ALCenum)) lookup(g_handle, name);
+        if (!fn.alcIsRenderFormatSupportedSOFT) fn.alcIsRenderFormatSupportedSOFT = (ALCboolean (*)(ALCdevice *, ALCsizei, ALCenum, ALCenum)) resolve_optional(name, device);
+        return fn.alcIsRenderFormatSupportedSOFT != NULL;
+    }
+    if (strcmp(name, "alcRenderSamplesSOFT") == 0) {
+        fn.alcRenderSamplesSOFT = (void (*)(ALCdevice *, ALCvoid *, ALCsizei)) lookup(g_handle, name);
+        if (!fn.alcRenderSamplesSOFT) fn.alcRenderSamplesSOFT = (void (*)(ALCdevice *, ALCvoid *, ALCsizei)) resolve_optional(name, device);
+        return fn.alcRenderSamplesSOFT != NULL;
+    }
+    if (strcmp(name, "alcDevicePauseSOFT") == 0) {
+        fn.alcDevicePauseSOFT = (void (*)(ALCdevice *)) lookup(g_handle, name);
+        if (!fn.alcDevicePauseSOFT) fn.alcDevicePauseSOFT = (void (*)(ALCdevice *)) resolve_optional(name, device);
+        return fn.alcDevicePauseSOFT != NULL;
+    }
+    if (strcmp(name, "alcDeviceResumeSOFT") == 0) {
+        fn.alcDeviceResumeSOFT = (void (*)(ALCdevice *)) lookup(g_handle, name);
+        if (!fn.alcDeviceResumeSOFT) fn.alcDeviceResumeSOFT = (void (*)(ALCdevice *)) resolve_optional(name, device);
+        return fn.alcDeviceResumeSOFT != NULL;
+    }
+    if (strcmp(name, "alcGetStringiSOFT") == 0) {
+        fn.alcGetStringiSOFT = (const ALCchar * (*)(ALCdevice *, ALCenum, ALCsizei)) lookup(g_handle, name);
+        if (!fn.alcGetStringiSOFT) fn.alcGetStringiSOFT = (const ALCchar * (*)(ALCdevice *, ALCenum, ALCsizei)) resolve_optional(name, device);
+        return fn.alcGetStringiSOFT != NULL;
+    }
+    if (strcmp(name, "alcResetDeviceSOFT") == 0) {
+        fn.alcResetDeviceSOFT = (ALCboolean (*)(ALCdevice *, const ALCint *)) lookup(g_handle, name);
+        if (!fn.alcResetDeviceSOFT) fn.alcResetDeviceSOFT = (ALCboolean (*)(ALCdevice *, const ALCint *)) resolve_optional(name, device);
+        return fn.alcResetDeviceSOFT != NULL;
+    }
+    if (strcmp(name, "alcGetInteger64vSOFT") == 0) {
+        fn.alcGetInteger64vSOFT = (void (*)(ALCdevice *, ALCenum, ALsizei, ALCint64SOFT *)) lookup(g_handle, name);
+        if (!fn.alcGetInteger64vSOFT) fn.alcGetInteger64vSOFT = (void (*)(ALCdevice *, ALCenum, ALsizei, ALCint64SOFT *)) resolve_optional(name, device);
+        return fn.alcGetInteger64vSOFT != NULL;
+    }
+    if (strcmp(name, "alcReopenDeviceSOFT") == 0) {
+        fn.alcReopenDeviceSOFT = (ALCboolean (*)(ALCdevice *, const ALCchar *, const ALCint *)) lookup(g_handle, name);
+        if (!fn.alcReopenDeviceSOFT) fn.alcReopenDeviceSOFT = (ALCboolean (*)(ALCdevice *, const ALCchar *, const ALCint *)) resolve_optional(name, device);
+        return fn.alcReopenDeviceSOFT != NULL;
+    }
+    if (strcmp(name, "alcEventIsSupportedSOFT") == 0) {
+        fn.alcEventIsSupportedSOFT = (ALCenum (*)(ALCenum, ALCenum)) lookup(g_handle, name);
+        if (!fn.alcEventIsSupportedSOFT) fn.alcEventIsSupportedSOFT = (ALCenum (*)(ALCenum, ALCenum)) resolve_optional(name, device);
+        return fn.alcEventIsSupportedSOFT != NULL;
+    }
+    if (strcmp(name, "alcEventControlSOFT") == 0) {
+        fn.alcEventControlSOFT = (ALCboolean (*)(ALCsizei, const ALCenum *, ALCboolean)) lookup(g_handle, name);
+        if (!fn.alcEventControlSOFT) fn.alcEventControlSOFT = (ALCboolean (*)(ALCsizei, const ALCenum *, ALCboolean)) resolve_optional(name, device);
+        return fn.alcEventControlSOFT != NULL;
+    }
+    if (strcmp(name, "alcGetProcAddress2") == 0) {
+        fn.alcGetProcAddress2 = (ALCvoid * (*)(ALCdevice *, const ALCchar *)) lookup(g_handle, name);
+        if (!fn.alcGetProcAddress2) fn.alcGetProcAddress2 = (ALCvoid * (*)(ALCdevice *, const ALCchar *)) resolve_optional(name, device);
+        return fn.alcGetProcAddress2 != NULL;
+    }
+    if (strcmp(name, "alcSetThreadContext") == 0) {
+        fn.alcSetThreadContext = (ALCboolean (*)(ALCcontext *)) lookup(g_handle, name);
+        if (!fn.alcSetThreadContext) fn.alcSetThreadContext = (ALCboolean (*)(ALCcontext *)) resolve_optional(name, device);
+        return fn.alcSetThreadContext != NULL;
+    }
+    if (strcmp(name, "alcGetThreadContext") == 0) {
+        fn.alcGetThreadContext = (ALCcontext * (*)(void)) lookup(g_handle, name);
+        if (!fn.alcGetThreadContext) fn.alcGetThreadContext = (ALCcontext * (*)(void)) resolve_optional(name, device);
+        return fn.alcGetThreadContext != NULL;
+    }
+
+    return lookup(g_handle, name) != NULL;
 }
 
 const char* openal_py_library_path(void)
