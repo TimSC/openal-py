@@ -4,6 +4,7 @@ from __future__ import annotations
 from array import array
 from enum import IntEnum
 import os
+import operator
 import sys
 from typing import TYPE_CHECKING
 import wave
@@ -12,6 +13,7 @@ from openal_py import _core
 from openal_py._resource import ContextResource
 from openal_py._constants import AL
 from openal_py._types import AudioFile, PCMData
+from openal_py._audio import decoded_pcm, soundfile_input, soundfile_module
 from openal_py._parameters import Parameter, ParameterValue, resolve
 from typing import cast
 
@@ -83,42 +85,50 @@ class Buffer(ContextResource):
                  sample_rate: int) -> Buffer:
         """Upload interleaved native-endian PCM from any buffer-protocol object."""
         context._require_current()
-        pcm = memoryview(data).tobytes()
         buffer = cls(context)
         try:
-            _core.buffer_data(buffer._handle, int(format), pcm, sample_rate)
+            buffer.upload_pcm(data, format, sample_rate)
         except Exception:
             buffer.close()
             raise
-        buffer._format = format
         return buffer
+
+    def upload_pcm(self, data: PCMData, format: AudioFormat | int, sample_rate: int) -> None:
+        """Replace PCM on an unattached, unqueued buffer without changing its name.
+
+        Native OpenAL rejects buffers still referenced by any source. Failed
+        uploads retain the previous contents and format metadata.
+        """
+        self._require_current()
+        pcm = memoryview(data).tobytes()
+        _core.buffer_data(self._handle, operator.index(format), pcm, operator.index(sample_rate))
+        self._format = format
 
     @classmethod
     def from_file(cls, context: Context, file: AudioFile,
-                  format: AudioFormat | int | None = None) -> Buffer:
+                  format: AudioFormat | int | None = None, *, mono: bool = False) -> Buffer:
         """Decode via optional soundfile; infer mono/stereo 16-bit by default.
 
-        Explicit formats change sample width, never the file's channel count.
+        Explicit formats change sample width; mono=True averages stereo channels.
         Caller-owned file objects remain open.
         """
         context._require_current()
-        try:
-            import soundfile as sf
-        except ImportError:
-            raise ImportError("install openal-py[soundfile] to load this audio format") from None
-        data, rate = sf.read(os.fspath(file) if isinstance(file, os.PathLike) else file,
-                             dtype="int16", always_2d=True)
-        channels = data.shape[1]
-        fmt = _infer_format(channels) if format is None else AudioFormat(format)
-        if channels != fmt.channels:
-            raise ValueError(f"file has {channels} channel(s), format expects {fmt.channels}")
-        if fmt.bits == 8:
-            data = ((data.astype("int32") >> 8) + 128).astype("uint8")
-        return cls.from_pcm(context, data, fmt, int(rate))
+        sf = soundfile_module()
+        with sf.SoundFile(soundfile_input(file)) as reader:
+            channels = reader.channels
+            _infer_format(channels)  # Keep the mono/stereo-only policy.
+            output_channels = 1 if mono else channels
+            fmt = _infer_format(output_channels) if format is None else AudioFormat(format)
+            if output_channels != fmt.channels:
+                raise ValueError(f"file has {output_channels} channel(s), format expects {fmt.channels}")
+            floating = reader.subtype in ('FLOAT', 'DOUBLE')
+            data = reader.read(dtype='float64' if floating else 'int16', always_2d=True)
+            pcm = decoded_pcm(data, floating=floating, mono=mono and channels == 2, bits=fmt.bits)
+            return cls.from_pcm(context, pcm, fmt, int(reader.samplerate))
 
     @classmethod
     def from_wav(cls, context: Context, file: AudioFile,
-                 *, format: AudioFormat | int | None = None) -> Buffer:
+                 *, format: AudioFormat | int | None = None, mono: bool = False) -> Buffer:
         """Decode 8/16-bit mono/stereo WAV, accepting paths or binary streams."""
         context._require_current()
         with wave.open(os.fspath(file) if isinstance(file, os.PathLike) else file, "rb") as wav:
@@ -126,20 +136,29 @@ class Buffer(ContextResource):
             if width not in (1, 2):
                 raise ValueError(f"unsupported sample width: {width} bytes")
             natural = _infer_format(channels, width * 8)
-            fmt = natural if format is None else AudioFormat(format)
-            if fmt.channels != channels:
-                raise ValueError(f"file has {channels} channel(s), format expects {fmt.channels}")
+            output_channels = 1 if mono else channels
+            fmt = _infer_format(output_channels, natural.bits) if format is None else AudioFormat(format)
+            if fmt.channels != output_channels:
+                raise ValueError(f"file has {output_channels} channel(s), format expects {fmt.channels}")
             data = wav.readframes(wav.getnframes())
+            if len(data) != wav.getnframes() * channels * width:
+                raise ValueError('truncated WAV sample data')
         if width == 2:
             samples = array("h")
             samples.frombytes(data)
             if sys.byteorder != "little":
                 samples.byteswap()
+            if mono and channels == 2:
+                samples = array('h', ((samples[i] + samples[i + 1]) // 2
+                                      for i in range(0, len(samples), 2)))
             pcm = bytes((sample >> 8) + 128 for sample in samples) if fmt.bits == 8 else samples.tobytes()
-        elif fmt.bits == 16:
-            pcm = array("h", ((sample - 128) << 8 for sample in data)).tobytes()
         else:
-            pcm = data
+            samples = array('h', ((sample - 128) << 8 for sample in data))
+            if mono and channels == 2:
+                samples = array('h', ((samples[i] + samples[i + 1]) // 2
+                                      for i in range(0, len(samples), 2)))
+            pcm = (samples.tobytes() if fmt.bits == 16 else
+                   bytes((sample >> 8) + 128 for sample in samples))
         return cls.from_pcm(context, pcm, fmt, rate)
 
     def _info(self, parameter: int) -> int:
@@ -212,10 +231,11 @@ class Buffer(ContextResource):
 
 
 
-def from_wav(context: Context, file: AudioFile) -> Buffer:
-    return Buffer.from_wav(context, file)
+def from_wav(context: Context, file: AudioFile, *, format: AudioFormat | int | None = None,
+             mono: bool = False) -> Buffer:
+    return Buffer.from_wav(context, file, format=format, mono=mono)
 
 
 def from_file(context: Context, file: AudioFile,
-              format: AudioFormat | int | None = None) -> Buffer:
-    return Buffer.from_file(context, file, format)
+              format: AudioFormat | int | None = None, *, mono: bool = False) -> Buffer:
+    return Buffer.from_file(context, file, format, mono=mono)

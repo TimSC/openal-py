@@ -171,6 +171,52 @@ Buffers expose `sample_rate`, `channels`, `bits`, `format`, `size` (bytes),
 `bytearray`, `memoryview`, and numeric arrays, containing interleaved native-endian
 PCM. Plain OpenAL integer formats are accepted for extension formats.
 
+`buffer.upload_pcm(data, format, sample_rate)` refills an existing native buffer.
+Unqueue it from every source first; processed buffers still in a queue and static
+attachments cannot be updated. A failed upload retains the prior format metadata.
+
+### Optional streaming helper
+
+`StreamingSource` owns a reusable buffer pool and an OpenAL source. It runs on
+its creating thread, requires its context to be current for playback operations,
+and advances only when the application calls `update()`. For example:
+
+```python
+from openal_py import Device, StreamingSource
+import time
+
+with Device() as device, device.create_context() as ctx, ctx.activate():
+    with StreamingSource.from_file(ctx, "music.ogg", chunk_frames=8192,
+                                   queue_depth=4, looping=False) as stream:
+        stream.play()
+        while not stream.finished:
+            stream.update()
+            time.sleep(0.01)  # In a GUI or game, call update() from the frame loop.
+```
+
+File streaming uses the optional SoundFile dependency. `format=` chooses PCM
+width and `mono=True` averages stereo channels. For dependency-free custom
+decoding, pass a `PCMDecoder` to `StreamingSource(ctx, decoder, ...)`: it exposes
+`format`, `sample_rate`, `read_frames(n)` and `close()`. Reads return at most `n`
+complete native-endian PCM frames; empty data means final EOF. An optional
+`rewind()` enables looping. Each read and the PCM pool are bounded by
+`chunk_frames` and `queue_depth`; custom decoders must bound their own storage.
+
+`pause()`/`resume()` preserve playback position. `stop()` is terminal;
+`finished` specifically reports natural EOF after the queue drains.
+`state` distinguishes initial, playing, paused, stopped, finished, error and
+closed states. Late updates can starve the native queue; `update()` restarts it
+and increments `underrun_count`. `buffered_duration` reports unconsumed audio
+seconds before pitch adjustment. Decoder failures close owned resources, retain
+the exception in `error`, and re-raise it.
+
+Use a resource block or `close()` even after context shutdown. File decoders
+opened by the helper are owned; caller-provided decoders are borrowed unless
+`close_decoder=True`. Caller binary streams remain open. `stream.source` exposes
+position, gain and effect controls; leave its queue, looping and lifetime to the
+helper. Looping rewinds the decoder rather than enabling native source looping.
+The helper is independent of `AudioEngine` and its static voice reclamation.
+
 For external native resources, use `Device.from_handle`, `Context.from_handle`,
 `Source.from_handle`, or `Buffer.from_handle` with explicit context/device ownership.
 Wrappers borrow by default; `owned=True` transfers cleanup responsibility. Borrowed
@@ -200,6 +246,7 @@ Runnable examples live in `examples/` (also shipped inside the wheel at
 | `10_capture.py` | microphone discovery; recording requires explicit `--record` |
 | `11_audio_engine.py` | simple playback, reusable sounds, voice controls, waiting |
 | `12_extending_engine.py` | voice factory and application update hooks |
+| `13_streaming_helper.py` | bounded streaming, pause/resume and loopback recovery |
 
 ```sh
 python examples/01_quickstart.py
@@ -212,7 +259,8 @@ The test suite executes every example, so they can't rot.
 `ctx.load(path_or_file)` loads 8/16-bit mono/stereo WAV without optional dependencies.
 It accepts filesystem paths, `PathLike` values, and seekable binary file objects;
 caller-owned streams remain open. WAV loading preserves sample width by default.
-For FLAC, OGG and other formats supported by libsndfile, install:
+WAV encodings beyond PCM8/16 (including PCM24 and floating point), FLAC, OGG and
+other formats use optional SoundFile. Install:
 
 ```sh
 pip install openal-py[soundfile]
@@ -222,12 +270,28 @@ pip install openal-py[soundfile]
 # Inside ctx.activate():
 sound = ctx.load("sound.ogg")                  # infer mono/stereo, decode to 16-bit
 quiet = ctx.load("stereo.wav", format=AudioFormat.STEREO8)  # explicit width conversion
+positional = ctx.load("stereo.wav", mono=True)  # opt-in stereo mean for spatial audio
 ```
 
-The file's channel count is preserved. An explicit format must match that channel
-count; loading never silently downmixes. `Buffer.from_wav()` and `Buffer.from_file()`
+The file's channel count is preserved by default. `mono=True` averages stereo
+channels; integer means round down with sufficient intermediate precision. PCM8
+is unsigned and centered at 128. An explicit format must match the resulting
+channel count, so `mono=True` conflicts with a stereo format. More than two input
+channels remain unsupported. Floating-point file samples are scaled to PCM16,
+rounded down and clipped; NaN becomes silence and infinities become full scale.
+PCM8 conversion then takes the upper eight bits and adds 128.
+
+`mono=True` is also accepted by `AudioEngine.load`, `Buffer.from_wav`,
+`Buffer.from_file` and module loading helpers. Engine cache entries distinguish
+mono and channel-preserving loads. To play a positional stereo asset through the
+engine, use `audio.play(audio.load(path, mono=True), position=(2, 0, -5))`.
+
+`Buffer.from_wav()` and `Buffer.from_file()`
 remain available when a particular decoder is needed. `from_wav()` rejects sample
 widths other than 8/16-bit; soundfile supports its own broader decoder capabilities.
+Seekable binary inputs can start at a nonzero position; that position becomes
+the audio file's origin for SoundFile decoding. Automatic WAV format inspection
+preserves the position before selecting a decoder.
 
 ## Remaining core controls and extensions
 

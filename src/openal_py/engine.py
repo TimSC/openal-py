@@ -91,7 +91,7 @@ class AudioEngine:
         self._max_voices = limit
         self._voices: set[Voice] = set()
         self._sounds: set[Sound] = set()
-        self._cache: dict[tuple[str, int | None], Sound] = {}
+        self._cache: dict[tuple[str, int | None, bool], Sound] = {}
         self._entered = False
         with _activation_lock, ExitStack() as rollback:
             if isinstance(device, Device):
@@ -187,7 +187,7 @@ class AudioEngine:
             return self.sound_from_buffer(buffer)
 
     def load(self, file: AudioFile, *, format: AudioFormat | int | None = None,
-             cache: bool = True) -> Sound:
+             cache: bool = True, mono: bool = False) -> Sound:
         """Decode a Sound; cache filesystem paths until Sound/engine closure.
 
         Streams are never cached. Use cache=False to re-read a changed path.
@@ -199,12 +199,12 @@ class AudioEngine:
             path = Path(file).expanduser().resolve()
             actual = path
             if cache:
-                key = (str(path), None if format is None else int(format))
+                key = (str(path), None if format is None else int(format), mono)
                 existing = self._cache.get(key)
                 if existing is not None and not existing.closed:
                     return existing
         with self.activate() as context:
-            sound = self.sound_from_buffer(context.load(actual, format=format))
+            sound = self.sound_from_buffer(context.load(actual, format=format, mono=mono))
         if key is not None:
             self._cache[key] = sound
         return sound

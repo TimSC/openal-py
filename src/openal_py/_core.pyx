@@ -203,13 +203,13 @@ def is_extension_present(name: str) -> bool:
     """Check an AL extension (requires a current context)."""
     _check_al()
     cdef bytes b = name.encode("ascii")
-    return _al_api.alIsExtensionPresent(b)
+    return bool(_al_api.alIsExtensionPresent(b))
 
 
 def is_alc_extension_present(name: str, device=None) -> bool:
     _check_alc(device)
     cdef bytes b = name.encode("ascii")
-    return _al_api.alcIsExtensionPresent(_dev(device), b)
+    return bool(_al_api.alcIsExtensionPresent(_dev(device), b))
 
 
 # ---------------------------------------------------------------------------

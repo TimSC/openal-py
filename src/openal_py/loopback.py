@@ -58,3 +58,21 @@ class LoopbackDevice(Device):
         if current is None or current.device is not self:
             raise ContextNotCurrentError('a context belonging to this loopback device must be current')
         return _core.loopback_render(self.handle, operator.index(frames))
+
+    def reset(self, *, hrtf: bool | None = None, hrtf_id: int | None = None,
+              attributes: Mapping[str | int, int] | None = None) -> None:
+        """Reset while retaining the device's current output configuration.
+
+        Explicit attributes override the current rate, channel layout or type.
+        Create a context before resetting, or supply all three output attributes.
+        """
+        self._require_extension('ALC_SOFT_HRTF')
+        attrs = {getattr(ALC, key) if isinstance(key, str) else key: value
+                 for key, value in (attributes or {}).items()}
+        keys = (ALC.ALC_FREQUENCY, ALC.ALC_FORMAT_CHANNELS_SOFT, ALC.ALC_FORMAT_TYPE_SOFT)
+        if not any(state.handle is not None for state in self._state.contexts):
+            if not all(key in attrs for key in keys):
+                raise ValueError('create a loopback context or supply all output attributes before reset')
+        else:
+            attrs = {**{key: _core.get_integer(self.handle, key) for key in keys}, **attrs}
+        super().reset(hrtf=hrtf, hrtf_id=hrtf_id, attributes=attrs)

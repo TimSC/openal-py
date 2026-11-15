@@ -39,10 +39,15 @@ from openal_py.group import SourceGroup
 from openal_py.effects import Effect, EffectType, Filter, FilterType, AuxiliaryEffectSlot
 from openal_py._parameters import DistanceModel, HRTFStatus, DeviceTiming, PlaybackLatency, Parameter, ParameterValue, NumericKind
 from openal_py.buffer import Buffer, AudioFormat, from_wav, from_file
+from openal_py.streaming import PCMDecoder, SoundFileDecoder, StreamingSource, StreamState
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "PCMDecoder",
+    "SoundFileDecoder",
+    "StreamingSource",
+    "StreamState",
     "AudioEngine",
     "Sound",
     "Voice",

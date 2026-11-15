@@ -191,27 +191,32 @@ class Context:
         from openal_py.buffer import Buffer
         return Buffer.from_pcm(self, data, format, sample_rate)
 
-    def load(self, file: AudioFile, *, format: AudioFormat | int | None = None) -> Buffer:
-        """Load WAV without dependencies, or other formats via soundfile.
+    def load(self, file: AudioFile, *, format: AudioFormat | int | None = None,
+             mono: bool = False) -> Buffer:
+        """Load PCM8/16 WAV without dependencies; otherwise use SoundFile.
 
         Accept paths or seekable binary streams; preserve the channel count.
         """
         import os
+        from openal_py._audio import wav_requires_decoder
         from openal_py.buffer import Buffer
         self._require_current()
         if isinstance(file, (str, os.PathLike)):
             with open(file, "rb") as stream:
                 header = stream.read(12)
+                stream.seek(0)
+                fallback = wav_requires_decoder(stream)
         else:
             position = file.tell()
             try:
                 header = file.read(12)
             finally:
                 file.seek(position)
+            fallback = wav_requires_decoder(file)
         wav = header[:4] == b"RIFF" and header[8:12] == b"WAVE"
-        if wav:
-            return Buffer.from_wav(self, file, format=format)
-        return Buffer.from_file(self, file, format=format)
+        if wav and not fallback:
+            return Buffer.from_wav(self, file, format=format, mono=mono)
+        return Buffer.from_file(self, file, format=format, mono=mono)
 
     def get_buffer(self, handle: int) -> Buffer | None:
         buffer = self._buffers.get(handle)

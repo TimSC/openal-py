@@ -19,9 +19,10 @@ OpenAL 1.1 defines 73 AL and 20 ALC entry points in this registry.
 | Source creation, destruction, validation | `ctx.create_source()`, `close()`, validated `Source.from_handle()` |
 | Source state, attenuation, cones, gain bounds | Properties including `source_type`, min/max gain, cone angles/gain |
 | Playback, individual or batched | Source methods; `ctx.group(sources)` with play/pause/stop/rewind |
-| Static buffers, PCM upload and metadata | `ctx.buffer_from_pcm()`, buffer metadata, validated `Buffer.from_handle()` |
+| Static buffers, PCM upload and metadata | `ctx.buffer_from_pcm()`, reusable `Buffer.upload_pcm()`, buffer metadata, validated `Buffer.from_handle()` |
 | Core parameter access | `get_parameter()`/`set_parameter()` on listener, source and buffer |
 | Queued streaming | `queue_buffers()`, `unqueue_buffers()`, queue counts and retained references |
+| Optional streaming helper | `StreamingSource`, bounded reusable pool, explicit `update()`, `PCMDecoder` and optional `SoundFileDecoder` |
 | Playback offsets | `offset_seconds`, `offset_samples`, `offset_bytes` |
 | Capture enumeration/open/start/stop/read/close | `CaptureDevice.devices()`, `default_name()`, `recording()`, `read()`, resource blocks |
 
