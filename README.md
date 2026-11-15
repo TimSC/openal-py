@@ -438,6 +438,18 @@ including when `-OpenAlSource` selects a custom checkout. The development tree a
 existing wheels are preserved. `-KeepBuildArtifacts` retains the private workspace
 for inspection; otherwise only that invocation's temporary directory is removed.
 
+To bundle an official OpenAL Soft Windows binary distribution instead of building
+OpenAL from source:
+
+```powershell
+.\tools\build_windows_wheels.ps1 -OpenAlBinaryDistribution "C:\Downloads\openal-soft-1.25.2-bin"
+```
+
+This uses the distribution's `include/AL` headers and bundles
+`bin/Win64/soft_oal.dll` as `openal_py/openal.dll`. It skips the OpenAL CMake
+build; Visual Studio Build Tools are still needed for the Python extension.
+`-OpenAlBinaryDistribution` and `-OpenAlSource` are mutually exclusive.
+
 Each script prints its output directory. Select the completed run to validate
 and upload (replace the example path below with that printed directory):
 

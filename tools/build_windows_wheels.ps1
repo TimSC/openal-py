@@ -2,7 +2,7 @@
 #
 # Requires, on a 64-bit Windows machine:
 #   - Visual Studio Build Tools (C++ workload)
-#   - CMake on PATH (winget install Kitware.CMake)
+#   - CMake on PATH when building OpenAL from source (winget install Kitware.CMake)
 #   - the Python Launcher (py.exe):
 #       winget install 9NQ7512CXL7T -e --accept-package-agreements --disable-interactivity
 #
@@ -13,6 +13,9 @@
 #       .\tools\build_windows_wheels.ps1
 #       .\tools\build_windows_wheels.ps1 -PythonVersions 3.11,3.12
 #
+# To bundle an official prebuilt distribution instead of compiling OpenAL:
+#       .\tools\build_windows_wheels.ps1 -OpenAlBinaryDistribution C:\Downloads\openal-soft-1.25.2-bin
+#
 # It snapshots the build inputs into a unique temporary workspace and builds
 # libopenal plus a CPython wheel per version without modifying the checkout. It
 # validates each with twine, and checks the win_amd64 platform tag.
@@ -21,6 +24,7 @@
 [CmdletBinding()]
 param(
     [string]$OpenAlSource = "",
+    [string]$OpenAlBinaryDistribution = "",
     [string[]]$PythonVersions = @("3.10", "3.11", "3.12", "3.13", "3.14"),
     [string]$Wheelhouse = "",
     [switch]$SkipDependencyInstall,
@@ -61,7 +65,19 @@ function Test-WheelContents {
 
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
-if ([string]::IsNullOrWhiteSpace($OpenAlSource)) {
+$UsePrebuiltOpenAl = -not [string]::IsNullOrWhiteSpace($OpenAlBinaryDistribution)
+if ($UsePrebuiltOpenAl) {
+    if (-not [string]::IsNullOrWhiteSpace($OpenAlSource)) {
+        throw "Specify either -OpenAlSource or -OpenAlBinaryDistribution, not both."
+    }
+    $OpenAlBinaryDistribution = [System.IO.Path]::GetFullPath($OpenAlBinaryDistribution)
+    $OpenAlSource = $OpenAlBinaryDistribution
+    $PrebuiltDll = Join-Path $OpenAlBinaryDistribution "bin\Win64\soft_oal.dll"
+    if (-not (Test-Path -LiteralPath $PrebuiltDll -PathType Leaf)) {
+        throw "64-bit OpenAL binary not found: expected $PrebuiltDll"
+    }
+}
+elseif ([string]::IsNullOrWhiteSpace($OpenAlSource)) {
     $OpenAlSource = Join-Path $RootDir "openal-soft"
 }
 $OpenAlSource = [System.IO.Path]::GetFullPath($OpenAlSource)
@@ -73,10 +89,12 @@ $Wheelhouse = [System.IO.Path]::GetFullPath($Wheelhouse)
 
 $OpenAlHeader = Join-Path $OpenAlSource "include\AL\al.h"
 if (-not (Test-Path -LiteralPath $OpenAlHeader -PathType Leaf)) {
-    throw "openal-soft source not found: expected $OpenAlHeader"
+    throw "OpenAL headers not found: expected $OpenAlHeader"
 }
 
-foreach ($Cmd in @("py", "cmake")) {
+$RequiredCommands = @("py")
+if (-not $UsePrebuiltOpenAl) { $RequiredCommands += "cmake" }
+foreach ($Cmd in $RequiredCommands) {
     if (-not (Get-Command $Cmd -ErrorAction SilentlyContinue)) {
         throw "'$Cmd' was not found on PATH."
     }
@@ -107,20 +125,27 @@ try {
     & py "-$($PythonVersions[0])-64" $PrepareSource $RootDir $Project --openal-source $OpenAlSource
     if ($LASTEXITCODE -ne 0) { throw "Could not prepare isolated build inputs." }
 
-    Write-Host "Building libopenal in $NativeBuild ..."
-    cmake -S (Join-Path $Project "openal-soft") -B $NativeBuild -A x64 `
-        -DCMAKE_BUILD_TYPE=Release `
-        -DBUILD_SHARED_LIBS=ON `
-        -DALSOFT_EXAMPLES=OFF `
-        -DALSOFT_UTILS=OFF `
-        -DALSOFT_TESTS=OFF
-    if ($LASTEXITCODE -ne 0) { throw "CMake configure failed for openal-soft." }
-    cmake --build $NativeBuild --config Release -j
-    if ($LASTEXITCODE -ne 0) { throw "openal-soft build failed." }
+    if ($UsePrebuiltOpenAl) {
+        Write-Host "Bundling prebuilt OpenAL from $PrebuiltDll"
+        New-Item -ItemType Directory -Path $NativeBuild | Out-Null
+        Copy-Item -LiteralPath $PrebuiltDll -Destination (Join-Path $NativeBuild "openal.dll")
+    }
+    else {
+        Write-Host "Building libopenal in $NativeBuild ..."
+        cmake -S (Join-Path $Project "openal-soft") -B $NativeBuild -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_SHARED_LIBS=ON `
+            -DALSOFT_EXAMPLES=OFF `
+            -DALSOFT_UTILS=OFF `
+            -DALSOFT_TESTS=OFF
+        if ($LASTEXITCODE -ne 0) { throw "CMake configure failed for openal-soft." }
+        cmake --build $NativeBuild --config Release -j
+        if ($LASTEXITCODE -ne 0) { throw "openal-soft build failed." }
+    }
 
     $OpenAlDll = Join-Path $NativeBuild "openal.dll"
     if (-not (Test-Path -LiteralPath $OpenAlDll -PathType Leaf)) {
-        throw "openal-soft did not produce $OpenAlDll."
+        throw "OpenAL DLL missing: $OpenAlDll."
     }
 
     Push-Location $Project

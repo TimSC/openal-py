@@ -84,6 +84,21 @@ def test_snapshot_respects_custom_openal_source(source_tree, tmp_path):
     assert not (destination / 'openal-soft/source.cpp').exists()
 
 
+def test_snapshot_accepts_binary_distribution_headers(source_tree, tmp_path):
+    distribution = tmp_path / 'openal-soft-bin'
+    write(distribution / 'include/AL/al.h', 'matching binary headers')
+    write(distribution / 'include/AL/alc.h', 'matching context headers')
+    write(distribution / 'bin/Win64/soft_oal.dll', 'original DLL')
+    write(distribution / 'bin/Win32/soft_oal.dll', '32-bit DLL')
+    destination = tmp_path / 'snapshot'
+    prepare.prepare_source(source_tree, destination, distribution)
+    assert (destination / 'openal-soft/include/AL/al.h').read_text() == 'matching binary headers'
+    assert (destination / 'openal-soft/include/AL/alc.h').is_file()
+    # The Windows script stages only the selected 64-bit DLL separately.
+    assert not list(destination.rglob('*.dll'))
+    assert (distribution / 'bin/Win64/soft_oal.dll').read_text() == 'original DLL'
+
+
 @pytest.mark.skipif(shutil.which('bash') is None, reason='requires bash')
 def test_parallel_wheel_invocations_preserve_outputs_and_native_build(source_tree, tmp_path):
     # Exercise the actual host script with a container-engine stand-in. Native
