@@ -97,7 +97,16 @@ rm -f "$WHEELHOUSE"/*.whl
         set -euo pipefail
 
         echo "Building libopenal with the image toolchain..."
-        dnf install -y alsa-lib-devel pulseaudio-libs-devel pipewire-devel
+        # JACK and PortAudio development packages come from EPEL. Enable its
+        # development dependencies too (PowerTools on AlmaLinux 8, CRB on 9+).
+        dnf install -y dnf-plugins-core epel-release
+        source /etc/os-release
+        case "${VERSION_ID%%.*}" in
+            8) dnf config-manager --set-enabled powertools ;;
+            9|10) dnf config-manager --set-enabled crb ;;
+        esac
+        dnf install -y alsa-lib-devel pulseaudio-libs-devel pipewire-devel \
+            jack-audio-connection-kit-devel portaudio-devel
         rm -rf openal-soft/build
         # PipeWire is built if found, not required: the pipewire in the image
         # (0.3.6) is older than the 0.3.23 openal-soft needs.
@@ -108,6 +117,10 @@ rm -f "$WHEELHOUSE"/*.whl
             -DBUILD_TESTING=OFF \
             -DALSOFT_REQUIRE_ALSA=ON \
             -DALSOFT_REQUIRE_PULSEAUDIO=ON \
+            -DALSOFT_BACKEND_JACK=ON \
+            -DALSOFT_REQUIRE_JACK=ON \
+            -DALSOFT_BACKEND_PORTAUDIO=ON \
+            -DALSOFT_REQUIRE_PORTAUDIO=ON \
             -DALSOFT_BACKEND_PIPEWIRE=ON
         cmake --build openal-soft/build -j "$JOBS"
         test -f openal-soft/build/libopenal.so.1

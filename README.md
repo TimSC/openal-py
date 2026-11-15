@@ -401,9 +401,11 @@ CONTAINER_ENGINE=podman tools/build_manylinux_wheels.sh
 The script builds `libopenal` from the `openal-soft/` submodule with the
 image's own toolchain (into `openal-soft/build`, the meson default), then
 builds and repairs one wheel per interpreter into `wheelhouse/`. The
-ALSA and PulseAudio backends are required, and PipeWire is built if found
-(their dev packages are installed from the image's repos; its pipewire is
-too old for openal-soft, so the backend is currently absent). The audio
+ALSA, PulseAudio, JACK, and PortAudio backends are required. PipeWire is built
+if found, but the default image currently supplies headers older than OpenAL
+requires. JACK and PortAudio development packages are installed from EPEL, with
+PowerTools (AlmaLinux 8) or CRB (9+) enabled for their dependencies. Missing required backends
+fail the build instead of silently reducing support. The audio
 libraries are not bundled — the backends dlopen them at runtime, so on
 systems without them the matching backends are simply unavailable. The
 default image is
