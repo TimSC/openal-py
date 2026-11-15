@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from openal_py.effects import Filter, AuxiliaryEffectSlot
 
 from openal_py import _core
-from openal_py import _finalize
+from openal_py._resource import ContextResource
 from openal_py._constants import AL
 from openal_py._parameters import Parameter, ParameterValue, PlaybackLatency, resolve
 
@@ -32,7 +32,7 @@ class SourceType(IntEnum):
     UNDETERMINED = AL.AL_UNDETERMINED
 
 
-class Source:
+class Source(ContextResource):
     """A single playback voice.
 
     Created via :meth:`Context.create_source` or ``Source(context)``.
@@ -45,16 +45,10 @@ class Source:
         self._initialize(context, _core.gen_sources(1)[0], True)
 
     def _initialize(self, context: Context, handle: int, owned: bool) -> None:
-        self._context = context
-        self._handle: int | None = handle
-        self._owned = owned
+        self._initialize_resource(context, handle, _core.delete_sources, owned=owned)
         self._buffer_refs: list[Buffer] = []
         self._direct_filter: Filter | None = None
         self._send_refs: dict[int, tuple[AuxiliaryEffectSlot, Filter | None]] = {}
-        self._retained: list[object] = []
-        self._finalizer = (_finalize.register(
-            self, context._state, handle, _core.delete_sources, self._retained
-        ) if owned else None)
         context._sources[handle] = self
 
     @classmethod
@@ -72,46 +66,14 @@ class Source:
         source._initialize(context, handle, owned)
         return source
 
-    @property
-    def context(self) -> Context:
-        return self._context
+    def _after_close(self, handle: int) -> None:
+        self._buffer_refs.clear()
+        self._send_refs.clear()
+        self._direct_filter = None
+        if self.context._sources.get(handle) is self:
+            self.context._sources.pop(handle, None)
 
-    @property
-    def closed(self) -> bool:
-        return self._handle is None or self.context.closed
-
-    @property
-    def handle(self) -> int | None:
-        return None if self.closed else self._handle
-
-    def close(self) -> None:
-        if self._handle is not None:
-            if self._owned:
-                _finalize.release(
-                    self.context._state, self._handle, _core.delete_sources, self._retained
-                )
-            self._buffer_refs.clear()
-            self._send_refs.clear()
-            self._direct_filter = None
-            self._retained.clear()
-            self.context._sources.pop(self._handle, None)
-            self._handle = None
-            if self._finalizer is not None:
-                self._finalizer.detach()
-
-    delete = close
-
-    def _require_current(self) -> None:
-        if self.closed:
-            raise ResourceClosedError("source has been deleted or its context closed")
-        self.context._require_current()
-
-    def __enter__(self) -> Source:
-        self._require_current()
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
+    delete = ContextResource.close
 
     # -- state --------------------------------------------------------------
 
@@ -528,6 +490,3 @@ class Source:
         if n < 0:
             raise ValueError('send index must be nonnegative')
         return self._send_refs.get(n)
-
-    def __repr__(self) -> str:
-        return f"Source(handle={self.handle}, closed={self.closed})"

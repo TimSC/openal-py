@@ -368,6 +368,10 @@ cmake -S openal-soft -B openal-soft/build -DCMAKE_BUILD_TYPE=Release -DENABLE_NU
 cmake --build openal-soft/build
 ```
 
+The build requires Meson 1.11 or newer, matching the Python build requirements.
+Wheel builds disable OpenAL examples, utilities, and test programs using the
+upstream `ALSOFT_EXAMPLES`, `ALSOFT_UTILS`, and `ALSOFT_TESTS` options.
+
 Then build and test the binding:
 
 ```sh
@@ -399,8 +403,12 @@ CONTAINER_ENGINE=podman tools/build_manylinux_wheels.sh
 ```
 
 The script builds `libopenal` from the `openal-soft/` submodule with the
-image's own toolchain (into `openal-soft/build`, the meson default), then
-builds and repairs one wheel per interpreter into `wheelhouse/`. The
+image's own toolchain in a private container workspace, then builds and repairs
+one wheel per interpreter. The checkout is mounted read-only; build inputs are
+copied without Git metadata, local build trees, or compiled artifacts. A unique
+`wheelhouse/manylinux_2_28_x86_64.XXXXXXXX/` output directory is created for each
+run (the prefix follows `--image`). Existing wheels and `openal-soft/build` are
+preserved, and concurrent runs have separate build and output directories. The
 ALSA, PulseAudio, JACK, and PortAudio backends are required. PipeWire is built
 if found, but the default image currently supplies headers older than OpenAL
 requires. JACK and PortAudio development packages are installed from EPEL, with
@@ -424,11 +432,17 @@ Tools, CMake and the `py` launcher):
 
 It builds `openal.dll` from the submodule, one `win_amd64` wheel per
 version, checks that the wheel contains exactly one `openal_py/openal.dll`,
-validates with twine, and collects everything in `wheelhouse/`.
+validates with twine, and collects wheels in a unique `wheelhouse/windows.RUN_ID/`
+directory. CMake and Python wheel builds use a private temporary source snapshot,
+including when `-OpenAlSource` selects a custom checkout. The development tree and
+existing wheels are preserved. `-KeepBuildArtifacts` retains the private workspace
+for inspection; otherwise only that invocation's temporary directory is removed.
 
-Validate and upload:
+Each script prints its output directory. Select the completed run to validate
+and upload (replace the example path below with that printed directory):
 
 ```sh
-python3 -m twine check wheelhouse/*.whl
-python3 -m twine upload wheelhouse/*.whl
+wheel_run="wheelhouse/the-directory-printed-by-the-build"
+python3 -m twine check "$wheel_run"/*.whl
+python3 -m twine upload "$wheel_run"/*.whl
 ```

@@ -13,11 +13,11 @@
 #       .\tools\build_windows_wheels.ps1
 #       .\tools\build_windows_wheels.ps1 -PythonVersions 3.11,3.12
 #
-# It builds libopenal from the openal-soft submodule (into
-# openal-soft\build, the meson default) and a CPython wheel per version,
+# It snapshots the build inputs into a unique temporary workspace and builds
+# libopenal plus a CPython wheel per version without modifying the checkout. It
 # validates each with twine, and checks the win_amd64 platform tag.
 # Upload with:
-#       py -3.12 -m twine upload wheelhouse\*.whl
+#       py -3.12 -m twine upload wheelhouse\windows.*\*.whl
 [CmdletBinding()]
 param(
     [string]$OpenAlSource = "",
@@ -82,91 +82,103 @@ foreach ($Cmd in @("py", "cmake")) {
     }
 }
 
+if ($PythonVersions.Count -eq 0) {
+    throw "Specify at least one Python version."
+}
+foreach ($Version in $PythonVersions) {
+    & py "-$Version-64" -c "import sys; print(sys.executable)"
+    if ($LASTEXITCODE -ne 0) {
+        throw "64-bit CPython $Version is not installed or not registered with py.exe."
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $Wheelhouse | Out-Null
-Get-ChildItem -LiteralPath $Wheelhouse -Filter "*.whl" -File |
-    Remove-Item -Force
+$RunId = [guid]::NewGuid().ToString("N")
+$RunDir = Join-Path $Wheelhouse "windows.$RunId"
+$WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "openal-py.$RunId"
+New-Item -ItemType Directory -Path $RunDir | Out-Null
+New-Item -ItemType Directory -Path $WorkDir | Out-Null
+$Project = Join-Path $WorkDir "project"
+$NativeBuild = Join-Path $WorkDir "openal"
+Write-Host "Wheel output: $RunDir"
 
-if (-not $KeepBuildArtifacts) {
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$OpenAlSource\build"
-}
-
-Write-Host "Building libopenal from $OpenAlSource ..."
-cmake -S $OpenAlSource -B "$OpenAlSource\build" -A x64 `
-    -DCMAKE_BUILD_TYPE=Release `
-    -DBUILD_SHARED_LIBS=ON `
-    -DENABLE_ALSOFT_EXAMPLES=OFF `
-    -DBUILD_TESTING=OFF
-if ($LASTEXITCODE -ne 0) { throw "CMake configure failed for openal-soft." }
-cmake --build "$OpenAlSource\build" --config Release -j
-if ($LASTEXITCODE -ne 0) { throw "openal-soft build failed." }
-
-$OpenAlDll = Join-Path $OpenAlSource "build\openal.dll"
-if (-not (Test-Path -LiteralPath $OpenAlDll -PathType Leaf)) {
-    throw "openal-soft did not produce $OpenAlDll."
-}
-
-Push-Location $RootDir
 try {
-    foreach ($Version in $PythonVersions) {
-        Write-Host "Building openal-py for CPython $Version (64-bit)"
+    $PrepareSource = Join-Path $PSScriptRoot "prepare_wheel_source.py"
+    & py "-$($PythonVersions[0])-64" $PrepareSource $RootDir $Project --openal-source $OpenAlSource
+    if ($LASTEXITCODE -ne 0) { throw "Could not prepare isolated build inputs." }
 
-        & py "-$Version-64" -c "import sys; print(sys.executable)"
-        if ($LASTEXITCODE -ne 0) {
-            throw "64-bit CPython $Version is not installed or not registered with py.exe."
-        }
+    Write-Host "Building libopenal in $NativeBuild ..."
+    cmake -S (Join-Path $Project "openal-soft") -B $NativeBuild -A x64 `
+        -DCMAKE_BUILD_TYPE=Release `
+        -DBUILD_SHARED_LIBS=ON `
+        -DALSOFT_EXAMPLES=OFF `
+        -DALSOFT_UTILS=OFF `
+        -DALSOFT_TESTS=OFF
+    if ($LASTEXITCODE -ne 0) { throw "CMake configure failed for openal-soft." }
+    cmake --build $NativeBuild --config Release -j
+    if ($LASTEXITCODE -ne 0) { throw "openal-soft build failed." }
 
-        if (-not $SkipDependencyInstall) {
-            & py "-$Version-64" -m pip install --upgrade `
-                "meson-python>=0.16" "meson>=1.8" "ninja>=1.11" "cython>=3.0" `
-                build twine
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to install build dependencies for CPython $Version."
+    $OpenAlDll = Join-Path $NativeBuild "openal.dll"
+    if (-not (Test-Path -LiteralPath $OpenAlDll -PathType Leaf)) {
+        throw "openal-soft did not produce $OpenAlDll."
+    }
+
+    Push-Location $Project
+    try {
+        foreach ($Version in $PythonVersions) {
+            Write-Host "Building openal-py for CPython $Version (64-bit)"
+            if (-not $SkipDependencyInstall) {
+                & py "-$Version-64" -m pip install --upgrade `
+                    "meson-python>=0.16" "meson>=1.11" "ninja>=1.11" "cython>=3.0" `
+                    build twine
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Failed to install build dependencies for CPython $Version."
+                }
             }
+
+            $RawWheelDir = Join-Path $WorkDir "raw/$Version"
+            New-Item -ItemType Directory -Force -Path $RawWheelDir | Out-Null
+            & py "-$Version-64" -m build `
+                --wheel `
+                --no-isolation `
+                --skip-dependency-check `
+                --outdir $RawWheelDir `
+                -C "setup-args=-Dopenal_libdir=$NativeBuild"
+            if ($LASTEXITCODE -ne 0) {
+                throw "Wheel build failed for CPython $Version."
+            }
+
+            $Wheels = @(Get-ChildItem -LiteralPath $RawWheelDir -Filter "*.whl" -File)
+            if ($Wheels.Count -ne 1) {
+                throw "Expected one wheel for CPython $Version; found $($Wheels.Count)."
+            }
+            $Wheel = $Wheels[0]
+            if ($Wheel.Name -notmatch "-cp\d+-cp\d+-win_amd64\.whl$") {
+                throw "Unexpected wheel platform tag: $($Wheel.Name)"
+            }
+            Test-WheelContents -WheelPath $Wheel.FullName
+            & py "-$Version-64" -m twine check $Wheel.FullName
+            if ($LASTEXITCODE -ne 0) {
+                throw "Twine validation failed for $($Wheel.Name)."
+            }
+            Copy-Item -LiteralPath $Wheel.FullName -Destination $RunDir
         }
-
-        if (-not $KeepBuildArtifacts) {
-            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
-                "build", "src\openal_py\*.c"
-        }
-
-        $RawWheelDir = Join-Path $env:TEMP "openal-py-$($Version.Replace('.', ''))"
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $RawWheelDir
-        New-Item -ItemType Directory -Force -Path $RawWheelDir | Out-Null
-
-        & py "-$Version-64" -m build `
-            --wheel `
-            --no-isolation `
-            --skip-dependency-check `
-            --outdir $RawWheelDir
-        if ($LASTEXITCODE -ne 0) {
-            throw "Wheel build failed for CPython $Version."
-        }
-
-        $Wheels = @(Get-ChildItem -LiteralPath $RawWheelDir -Filter "*.whl" -File)
-        if ($Wheels.Count -ne 1) {
-            throw "Expected one wheel for CPython $Version; found $($Wheels.Count)."
-        }
-
-        $Wheel = $Wheels[0]
-        if ($Wheel.Name -notmatch "-cp\d+-cp\d+-win_amd64\.whl$") {
-            throw "Unexpected wheel platform tag: $($Wheel.Name)"
-        }
-
-        Test-WheelContents -WheelPath $Wheel.FullName
-
-        & py "-$Version-64" -m twine check $Wheel.FullName
-        if ($LASTEXITCODE -ne 0) {
-            throw "Twine validation failed for $($Wheel.Name)."
-        }
-
-        Copy-Item -LiteralPath $Wheel.FullName -Destination $Wheelhouse
+    }
+    finally {
+        Pop-Location
     }
 }
 finally {
-    Pop-Location
+    if ($KeepBuildArtifacts) {
+        Write-Host "Build workspace retained: $WorkDir"
+    }
+    else {
+        # Only this invocation's temporary directory is ever removed.
+        Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host "Built Windows wheels:"
-Get-ChildItem -LiteralPath $Wheelhouse -Filter "*.whl" -File |
+Get-ChildItem -LiteralPath $RunDir -Filter "*.whl" -File |
     Sort-Object Name |
     ForEach-Object { Write-Host "  $($_.FullName)" }

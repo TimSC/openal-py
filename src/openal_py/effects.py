@@ -4,11 +4,12 @@ from __future__ import annotations
 from collections.abc import MutableMapping
 from enum import IntEnum
 import operator
-from typing import TYPE_CHECKING, Callable, Iterator, TypeVar, cast
+from typing import TYPE_CHECKING, Callable, Iterator, cast
 
-from openal_py import _core, _finalize
+from openal_py import _core
+from openal_py._resource import ContextResource
 from openal_py._constants import AL
-from openal_py._errors import ContextMismatchError, ResourceClosedError
+from openal_py._errors import ContextMismatchError
 from openal_py._parameters import ParameterValue
 
 if TYPE_CHECKING:
@@ -169,54 +170,11 @@ _SCHEMAS: dict[str, dict[str, tuple[int, str]]] = {
 }
 
 
-_R = TypeVar("_R", bound="_Resource")
-
-
-class _Resource:
-    _kind: str
-    _delete: Callable[[list[int]], None]
-
+class _Resource(ContextResource):
     def _initialize(self, context: Context, handle: int, kind: str,
                     delete: Callable[[list[int]], None]) -> None:
-        self._context = context
-        self._handle: int | None = handle
         self._kind = kind
-        self._delete = delete
-        self._retained: list[object] = []
-        self._finalizer = _finalize.register(self, context._state, handle, delete, self._retained)
-
-    @property
-    def context(self) -> Context:
-        return self._context
-
-    @property
-    def closed(self) -> bool:
-        return self._handle is None or self.context.closed
-
-    @property
-    def handle(self) -> int | None:
-        return None if self.closed else self._handle
-
-    def _require_current(self) -> None:
-        if self.closed:
-            raise ResourceClosedError(f'{self._kind} has been closed')
-        self.context._require_current()
-
-    def close(self) -> None:
-        if self._handle is not None:
-            _finalize.release(self.context._state, self._handle, self._delete, self._retained)
-            self._handle = None
-            self._finalizer.detach()
-
-    def __enter__(self: _R) -> _R:
-        self._require_current()
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
-
-    def __repr__(self) -> str:
-        return f'{type(self).__name__}(handle={self.handle}, closed={self.closed})'
+        self._initialize_resource(context, handle, delete, label=kind)
 
 
 class Parameters(MutableMapping[str, ParameterValue]):

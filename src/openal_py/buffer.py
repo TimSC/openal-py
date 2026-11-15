@@ -8,9 +8,9 @@ import sys
 from typing import TYPE_CHECKING
 import wave
 
-from openal_py import _core, _finalize
+from openal_py import _core
+from openal_py._resource import ContextResource
 from openal_py._constants import AL
-from openal_py._errors import ResourceClosedError
 from openal_py._types import AudioFile, PCMData
 from openal_py._parameters import Parameter, ParameterValue, resolve
 from typing import cast
@@ -45,7 +45,7 @@ def _infer_format(channels: int, bits: int = 16) -> AudioFormat:
     raise ValueError(f"unsupported audio layout: {channels} channels, {bits} bits")
 
 
-class Buffer:
+class Buffer(ContextResource):
     """A PCM buffer. Construction creates an empty, owned native buffer."""
 
     def __init__(self, context: Context):
@@ -53,12 +53,8 @@ class Buffer:
         self._initialize(context, _core.gen_buffers(1)[0], True)
 
     def _initialize(self, context: Context, handle: int, owned: bool) -> None:
-        self._context = context
-        self._handle: int | None = handle
-        self._owned = owned
+        self._initialize_resource(context, handle, _core.delete_buffers, owned=owned)
         self._format: AudioFormat | int | None = None
-        self._finalizer = (_finalize.register(self, context._state, handle, _core.delete_buffers)
-                           if owned else None)
         context._buffers[handle] = self
 
     @classmethod
@@ -76,33 +72,11 @@ class Buffer:
         buffer._initialize(context, handle, owned)
         return buffer
 
-    @property
-    def context(self) -> Context:
-        return self._context
+    def _after_close(self, handle: int) -> None:
+        if self.context._buffers.get(handle) is self:
+            self.context._buffers.pop(handle, None)
 
-    @property
-    def closed(self) -> bool:
-        return self._handle is None or self.context.closed
-
-    @property
-    def handle(self) -> int | None:
-        return None if self.closed else self._handle
-
-    def close(self) -> None:
-        if self._handle is not None:
-            if self._owned:
-                _finalize.release(self.context._state, self._handle, _core.delete_buffers)
-            self.context._buffers.pop(self._handle, None)
-            self._handle = None
-            if self._finalizer is not None:
-                self._finalizer.detach()
-
-    delete = close
-
-    def _require_current(self) -> None:
-        if self.closed:
-            raise ResourceClosedError("buffer has been deleted or its context closed")
-        self.context._require_current()
+    delete = ContextResource.close
 
     @classmethod
     def from_pcm(cls, context: Context, data: PCMData, format: AudioFormat | int,
@@ -236,15 +210,6 @@ class Buffer:
             raise NotImplementedError('AL_SOFT_loop_points is unavailable')
         self.set_parameter(AL.AL_LOOP_POINTS_SOFT, points)
 
-    def __enter__(self) -> Buffer:
-        self._require_current()
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
-
-    def __repr__(self) -> str:
-        return f"Buffer(handle={self.handle}, closed={self.closed})"
 
 
 def from_wav(context: Context, file: AudioFile) -> Buffer:

@@ -163,3 +163,21 @@ def test_context_destroyed_exactly_once(device, monkeypatch, explicit):
     del context
     gc.collect()
     assert calls == [handle]
+
+
+def test_successful_release_stays_disarmed_if_bookkeeping_raises(ctx):
+    class FailingBuffer(Buffer):
+        def _after_close(self, handle):
+            super()._after_close(handle)
+            raise RuntimeError('bookkeeping failed')
+    old = FailingBuffer(ctx)
+    handle = old.handle
+    with pytest.raises(RuntimeError, match='bookkeeping failed'):
+        old.close()
+    assert old.closed
+    replacement = ctx.create_buffer()
+    assert replacement.handle == handle
+    del old
+    gc.collect()
+    from openal_py import _core
+    assert _core.is_buffer(replacement.handle)
