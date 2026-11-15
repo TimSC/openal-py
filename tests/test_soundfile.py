@@ -94,3 +94,29 @@ class TestFromFile:
         _write_wav(p)
         with pytest.raises(ImportError, match="soundfile"):
             Buffer.from_file(ctx, str(p))
+
+
+@pytest.mark.parametrize("channels,format", [(1, AudioFormat.MONO8), (2, AudioFormat.STEREO8)])
+def test_unsigned_eight_bit_conversion(ctx, tmp_path, monkeypatch, channels, format):
+    import numpy as np
+    from openal_py import _core
+    path = tmp_path / "eight.wav"
+    samples = np.array([-32768, -256, 0, 256, 32767], dtype="int16")
+    if channels == 2:
+        samples = np.column_stack([samples, samples])
+    sf.write(str(path), samples, 8000, subtype="PCM_16")
+    uploaded = []
+    upload = _core.buffer_data
+
+    def record(handle, fmt, data, frequency):
+        uploaded.append(data)
+        return upload(handle, fmt, data, frequency)
+
+    monkeypatch.setattr(_core, "buffer_data", record)
+    buffer = Buffer.from_file(ctx, path, format)
+    expected = np.array([0, 127, 128, 129, 255], dtype="uint8")
+    if channels == 2:
+        expected = np.column_stack([expected, expected])
+    assert uploaded == [expected.tobytes()]
+    assert buffer.channels == channels
+    assert buffer.size == 5 * channels

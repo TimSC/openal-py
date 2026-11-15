@@ -11,6 +11,9 @@ This module is deliberately un-pythonic. Build object models on top
 """
 # cython: language_level=3
 from libc.stdint cimport int64_t
+from libc.stddef cimport size_t
+from libc.limits cimport INT_MAX
+from operator import index
 from libc.stdlib cimport calloc, free
 from cpython cimport PyLong_AsVoidPtr
 
@@ -38,6 +41,33 @@ cdef extern from "AL/al.h":
     ctypedef void ALvoid
 
 from openal_py._errors import ALLError, ALCError
+
+
+cdef inline Py_ssize_t _count(object value) except -1:
+    value = index(value)
+    if value < 0 or value > INT_MAX:
+        raise ValueError("count must be between 0 and INT_MAX")
+    return value
+
+
+cdef void* _allocate(object count, size_t item_size) except NULL:
+    cdef Py_ssize_t n = _count(count)
+    cdef void* result
+    if n > (<size_t>-1) // item_size:
+        raise OverflowError("allocation size overflow")
+    # A non-null allocation also makes zero-count native calls safe.
+    result = calloc(max(n, 1), item_size)
+    if result == NULL:
+        raise MemoryError()
+    return result
+
+
+cdef void _vector_length(object pname, object value, Py_ssize_t expected) except *:
+    if isinstance(value, (tuple, list)):
+        if len(value) != expected:
+            raise ValueError(f"parameter {pname!r} requires {expected} component(s)")
+    elif expected != 1:
+        raise ValueError(f"parameter {pname!r} requires {expected} component(s)")
 
 
 cdef inline void* _ptr(object h):
@@ -230,16 +260,15 @@ def create_context(device, attributes: dict | None = None) -> int:
     cdef ALCint* attrs = NULL
     cdef ALCcontext* ctx
     cdef Py_ssize_t n, i
-    if attributes:
-        n = len(attributes)
-        attrs = <ALCint*> calloc(2 * n + 1, 4)
-        i = 0
-        for k, v in attributes.items():
-            attrs[2 * i] = <ALCint> k
-            attrs[2 * i + 1] = <ALCint> v
-            i += 1
-    ctx = _al_api.alcCreateContext(_dev(device), attrs)
-    if attrs != NULL:
+    try:
+        if attributes:
+            n = len(attributes)
+            attrs = <ALCint*> _allocate(2 * n + 1, sizeof(ALCint))
+            for i, (k, v) in enumerate(attributes.items()):
+                attrs[2 * i] = <ALCint> k
+                attrs[2 * i + 1] = <ALCint> v
+        ctx = _al_api.alcCreateContext(_dev(device), attrs)
+    finally:
         free(attrs)
     if ctx == NULL:
         _check_alc(device)
@@ -296,7 +325,7 @@ def get_integer(device, pname) -> int:
 
 def get_integerv(device, pname, n: int = 1) -> list:
     """Query several device attributes (via alcGetIntegerv)."""
-    cdef ALCint* buf = <ALCint*> calloc(n, 4)
+    cdef ALCint* buf = <ALCint*> _allocate(n, sizeof(ALCint))
     cdef int64_t i
     try:
         _al_api.alcGetIntegerv(_dev(device), <ALCenum> pname, <ALsizei> n, buf)
@@ -319,30 +348,32 @@ cdef inline bint _all_ints(object v):
 
 
 def listener_set(pname, value) -> None:
+    _vector_length(pname, value, 6 if pname == 0x100F else (3 if pname in (0x1004, 0x1006) else 1))
     cdef ALenum p = <ALenum> pname
     cdef ALfloat buf6[6]
     cdef int64_t i
-    try:
-        if isinstance(value, (int, bool)) and not isinstance(value, float):
-            _al_api.alListeneri(p, <ALint> value)
-        elif isinstance(value, float):
-            _al_api.alListenerf(p, <ALfloat> value)
-        elif isinstance(value, (tuple, list)) and len(value) == 3 and _all_ints(value):
-            _al_api.alListener3i(p, <ALint> value[0], <ALint> value[1], <ALint> value[2])
-        elif isinstance(value, (tuple, list)) and len(value) == 3:
-            _al_api.alListener3f(p, <ALfloat> value[0], <ALfloat> value[1], <ALfloat> value[2])
-        elif isinstance(value, (tuple, list)) and len(value) == 6:
-            # e.g. AL_ORIENTATION: (dirX, dirY, dirZ, upX, upY, upZ)
-            for i in range(6):
-                buf6[i] = <ALfloat> value[i]
-            _al_api.alListenerfv(p, buf6)
-        else:
-            raise TypeError(f"listener_set: unsupported value for {pname!r}")
-    finally:
-        _check_al()
+    if isinstance(value, (int, bool)) and not isinstance(value, float):
+        _al_api.alListeneri(p, <ALint> value)
+    elif isinstance(value, float):
+        _al_api.alListenerf(p, <ALfloat> value)
+    elif isinstance(value, (tuple, list)) and len(value) == 3 and _all_ints(value):
+        _al_api.alListener3i(p, <ALint> value[0], <ALint> value[1], <ALint> value[2])
+    elif isinstance(value, (tuple, list)) and len(value) == 3:
+        _al_api.alListener3f(p, <ALfloat> value[0], <ALfloat> value[1], <ALfloat> value[2])
+    elif isinstance(value, (tuple, list)) and len(value) == 6:
+        # e.g. AL_ORIENTATION: (dirX, dirY, dirZ, upX, upY, upZ)
+        for i in range(6):
+            buf6[i] = <ALfloat> value[i]
+        _al_api.alListenerfv(p, buf6)
+    else:
+        raise TypeError(f"listener_set: unsupported value for {pname!r}")
+    _check_al()
 
 
 def listener_get(pname, n: int = 1):
+    expected = 6 if pname == 0x100F else (3 if pname in (0x1004, 0x1006) else 1)
+    if n != expected:
+        raise ValueError(f"parameter requires {expected} component(s)")
     cdef ALenum p = <ALenum> pname
     cdef ALfloat a, b, c, v
     cdef ALfloat buf6[6]
@@ -367,8 +398,8 @@ def listener_get(pname, n: int = 1):
 # ---------------------------------------------------------------------------
 
 def gen_sources(n: int = 1) -> list:
-    cdef int64_t count = <int64_t> n
-    cdef ALuint* arr = <ALuint*> calloc(count, 4)
+    cdef int64_t count = _count(n)
+    cdef ALuint* arr = <ALuint*> _allocate(count, sizeof(ALuint))
     try:
         _al_api.alGenSources(count, arr)
         _check_al()
@@ -380,7 +411,7 @@ def gen_sources(n: int = 1) -> list:
 def delete_sources(sources) -> None:
     cdef int64_t n = len(sources)
     cdef int64_t i
-    cdef ALuint* arr = <ALuint*> calloc(n, 4)
+    cdef ALuint* arr = <ALuint*> _allocate(n, sizeof(ALuint))
     try:
         for i in range(n):
             arr[i] = <ALuint> sources[i]
@@ -412,29 +443,30 @@ def source_stop(source) -> None:
 
 def source_set(source, pname, value) -> None:
     """Set a source parameter: scalar float/int, or 1/3-tuple."""
+    _vector_length(pname, value, 3 if pname in (0x1004, 0x1005, 0x1006, 0x20006) else 1)
     cdef ALuint s = <ALuint> source
     cdef ALenum p = <ALenum> pname
-    try:
-        if isinstance(value, (int, bool)) and not isinstance(value, float):
-            _al_api.alSourcei(s, p, <ALint> value)
-        elif isinstance(value, float):
-            _al_api.alSourcef(s, p, <ALfloat> value)
-        elif isinstance(value, (tuple, list)) and len(value) == 1:
-            _al_api.alSourcef(s, p, <ALfloat> value[0])
-        elif isinstance(value, (tuple, list)) and len(value) == 3 and _all_ints(value):
-            _al_api.alSource3i(s, p, <ALint> value[0], <ALint> value[1], <ALint> value[2])
-        elif isinstance(value, (tuple, list)) and len(value) == 3:
-            _al_api.alSource3f(s, p, <ALfloat> value[0], <ALfloat> value[1], <ALfloat> value[2])
-        else:
-            raise TypeError(f"source_set: unsupported value for {pname!r}")
-    finally:
-        _check_al()
+    if isinstance(value, (int, bool)) and not isinstance(value, float):
+        _al_api.alSourcei(s, p, <ALint> value)
+    elif isinstance(value, float):
+        _al_api.alSourcef(s, p, <ALfloat> value)
+    elif isinstance(value, (tuple, list)) and len(value) == 1:
+        _al_api.alSourcef(s, p, <ALfloat> value[0])
+    elif isinstance(value, (tuple, list)) and len(value) == 3 and _all_ints(value):
+        _al_api.alSource3i(s, p, <ALint> value[0], <ALint> value[1], <ALint> value[2])
+    elif isinstance(value, (tuple, list)) and len(value) == 3:
+        _al_api.alSource3f(s, p, <ALfloat> value[0], <ALfloat> value[1], <ALfloat> value[2])
+    else:
+        raise TypeError(f"source_set: unsupported value for {pname!r}")
+    _check_al()
 
 
 def source_get(source, pname, n: int = 1):
     """Get a source parameter (1 -> float, 3 -> tuple)."""
     cdef ALuint s = <ALuint> source
     cdef ALenum p = <ALenum> pname
+    if n not in (1, 3):
+        raise ValueError("n must be 1 or 3")
     cdef ALfloat a, b, c, v
     try:
         if n == 3:
@@ -458,7 +490,7 @@ def source_geti(source, pname) -> int:
 def source_queue_buffers(source, buffers) -> None:
     cdef int64_t n = len(buffers)
     cdef int64_t i
-    cdef ALuint* arr = <ALuint*> calloc(n, 4)
+    cdef ALuint* arr = <ALuint*> _allocate(n, sizeof(ALuint))
     try:
         for i in range(n):
             arr[i] = <ALuint> buffers[i]
@@ -470,7 +502,7 @@ def source_queue_buffers(source, buffers) -> None:
 
 def source_unqueue_buffers(source, n: int) -> list:
     cdef int64_t i
-    cdef ALuint* arr = <ALuint*> calloc(n, 4)
+    cdef ALuint* arr = <ALuint*> _allocate(n, sizeof(ALuint))
     try:
         _al_api.alSourceUnqueueBuffers(<ALuint> source, <ALsizei> n, arr)
         _check_al()
@@ -484,8 +516,8 @@ def source_unqueue_buffers(source, n: int) -> list:
 # ---------------------------------------------------------------------------
 
 def gen_buffers(n: int = 1) -> list:
-    cdef int64_t count = <int64_t> n
-    cdef ALuint* arr = <ALuint*> calloc(count, 4)
+    cdef int64_t count = _count(n)
+    cdef ALuint* arr = <ALuint*> _allocate(count, sizeof(ALuint))
     try:
         _al_api.alGenBuffers(count, arr)
         _check_al()
@@ -497,7 +529,7 @@ def gen_buffers(n: int = 1) -> list:
 def delete_buffers(buffers) -> None:
     cdef int64_t n = len(buffers)
     cdef int64_t i
-    cdef ALuint* arr = <ALuint*> calloc(n, 4)
+    cdef ALuint* arr = <ALuint*> _allocate(n, sizeof(ALuint))
     try:
         for i in range(n):
             arr[i] = <ALuint> buffers[i]
@@ -514,7 +546,9 @@ def is_buffer(buffer) -> bool:
 
 def buffer_data(buffer, format: int, data: bytes, frequency: int) -> None:
     """Fill a buffer with raw PCM sample data (bytes)."""
-    cdef int64_t size = len(data)
+    cdef int64_t size = _count(len(data))
+    if frequency <= 0 or frequency > INT_MAX:
+        raise ValueError("frequency must be between 1 and INT_MAX")
     _al_api.alBufferData(
         <ALuint> buffer, <ALenum> format, <const ALchar*> data,
         <ALsizei> size, <ALint> frequency)
@@ -583,8 +617,8 @@ def alc_get_error(device) -> int:
 # ---------------------------------------------------------------------------
 
 def gen_effects(n: int = 1) -> list:
-    cdef int64_t count = <int64_t> n
-    cdef ALuint* arr = <ALuint*> calloc(count, 4)
+    cdef int64_t count = _count(n)
+    cdef ALuint* arr = <ALuint*> _allocate(count, sizeof(ALuint))
     try:
         _al_api.alGenEffects(count, arr)
         _check_al()
@@ -596,7 +630,7 @@ def gen_effects(n: int = 1) -> list:
 def delete_effects(effects) -> None:
     cdef int64_t n = len(effects)
     cdef int64_t i
-    cdef ALuint* arr = <ALuint*> calloc(n, 4)
+    cdef ALuint* arr = <ALuint*> _allocate(n, sizeof(ALuint))
     try:
         for i in range(n):
             arr[i] = <ALuint> effects[i]
@@ -610,8 +644,16 @@ def effect_set(effect, pname, value) -> None:
     """Set an effect parameter: scalar float/int, or a float list."""
     cdef ALuint e = <ALuint> effect
     cdef ALenum p = <ALenum> pname
-    cdef ALfloat* buf
+    cdef ALfloat* buf = NULL
     cdef int64_t n, i
+    cdef ALint effect_type
+    expected = 1
+    if pname in (0x000B, 0x000E):
+        _al_api.alGetEffecti(e, 0x8001, &effect_type)
+        _check_al()
+        if effect_type == 0x8000:  # AL_EFFECT_EAXREVERB
+            expected = 3
+    _vector_length(pname, value, expected)
     try:
         if isinstance(value, (int, bool)) and not isinstance(value, float):
             _al_api.alEffecti(e, p, <ALint> value)
@@ -619,20 +661,20 @@ def effect_set(effect, pname, value) -> None:
             _al_api.alEffectf(e, p, <ALfloat> value)
         elif isinstance(value, (tuple, list)):
             n = len(value)
-            buf = <ALfloat*> calloc(n, 4)
+            buf = <ALfloat*> _allocate(n, sizeof(ALfloat))
             for i in range(n):
                 buf[i] = <ALfloat> value[i]
             _al_api.alEffectfv(e, p, buf)
-            free(buf)
         else:
             raise TypeError(f"effect_set: unsupported value for {pname!r}")
     finally:
-        _check_al()
+        free(buf)
+    _check_al()
 
 
 def gen_filters(n: int = 1) -> list:
-    cdef int64_t count = <int64_t> n
-    cdef ALuint* arr = <ALuint*> calloc(count, 4)
+    cdef int64_t count = _count(n)
+    cdef ALuint* arr = <ALuint*> _allocate(count, sizeof(ALuint))
     try:
         _al_api.alGenFilters(count, arr)
         _check_al()
@@ -644,7 +686,7 @@ def gen_filters(n: int = 1) -> list:
 def delete_filters(filters) -> None:
     cdef int64_t n = len(filters)
     cdef int64_t i
-    cdef ALuint* arr = <ALuint*> calloc(n, 4)
+    cdef ALuint* arr = <ALuint*> _allocate(n, sizeof(ALuint))
     try:
         for i in range(n):
             arr[i] = <ALuint> filters[i]
@@ -658,8 +700,9 @@ def filter_set(f, pname, value) -> None:
     """Set a filter parameter: scalar float/int, or a float list."""
     cdef ALuint flt = <ALuint> f
     cdef ALenum p = <ALenum> pname
-    cdef ALfloat* buf
+    cdef ALfloat* buf = NULL
     cdef int64_t n, i
+    _vector_length(pname, value, 1)
     try:
         if isinstance(value, (int, bool)) and not isinstance(value, float):
             _al_api.alFilteri(flt, p, <ALint> value)
@@ -667,20 +710,20 @@ def filter_set(f, pname, value) -> None:
             _al_api.alFilterf(flt, p, <ALfloat> value)
         elif isinstance(value, (tuple, list)):
             n = len(value)
-            buf = <ALfloat*> calloc(n, 4)
+            buf = <ALfloat*> _allocate(n, sizeof(ALfloat))
             for i in range(n):
                 buf[i] = <ALfloat> value[i]
             _al_api.alFilterfv(flt, p, buf)
-            free(buf)
         else:
             raise TypeError(f"filter_set: unsupported value for {pname!r}")
     finally:
-        _check_al()
+        free(buf)
+    _check_al()
 
 
 def gen_auxiliary_effect_slots(n: int = 1) -> list:
-    cdef int64_t count = <int64_t> n
-    cdef ALuint* arr = <ALuint*> calloc(count, 4)
+    cdef int64_t count = _count(n)
+    cdef ALuint* arr = <ALuint*> _allocate(count, sizeof(ALuint))
     try:
         _al_api.alGenAuxiliaryEffectSlots(count, arr)
         _check_al()
@@ -692,7 +735,7 @@ def gen_auxiliary_effect_slots(n: int = 1) -> list:
 def delete_auxiliary_effect_slots(slots) -> None:
     cdef int64_t n = len(slots)
     cdef int64_t i
-    cdef ALuint* arr = <ALuint*> calloc(n, 4)
+    cdef ALuint* arr = <ALuint*> _allocate(n, sizeof(ALuint))
     try:
         for i in range(n):
             arr[i] = <ALuint> slots[i]
@@ -706,8 +749,9 @@ def auxiliary_effect_slot_set(slot, pname, value) -> None:
     """Set an auxiliary effect slot parameter: scalar float/int, or a float list."""
     cdef ALuint sl = <ALuint> slot
     cdef ALenum p = <ALenum> pname
-    cdef ALfloat* buf
+    cdef ALfloat* buf = NULL
     cdef int64_t n, i
+    _vector_length(pname, value, 1)
     try:
         if isinstance(value, (int, bool)) and not isinstance(value, float):
             _al_api.alAuxiliaryEffectSloti(sl, p, <ALint> value)
@@ -715,12 +759,12 @@ def auxiliary_effect_slot_set(slot, pname, value) -> None:
             _al_api.alAuxiliaryEffectSlotf(sl, p, <ALfloat> value)
         elif isinstance(value, (tuple, list)):
             n = len(value)
-            buf = <ALfloat*> calloc(n, 4)
+            buf = <ALfloat*> _allocate(n, sizeof(ALfloat))
             for i in range(n):
                 buf[i] = <ALfloat> value[i]
             _al_api.alAuxiliaryEffectSlotfv(sl, p, buf)
-            free(buf)
         else:
             raise TypeError(f"auxiliary_effect_slot_set: unsupported value for {pname!r}")
     finally:
-        _check_al()
+        free(buf)
+    _check_al()

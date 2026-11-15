@@ -51,7 +51,7 @@ def test_from_pcm_rejects_bad_format(ctx):
 
 
 def test_from_pcm_rejects_bad_frequency(ctx):
-    with pytest.raises(ALLError):
+    with pytest.raises(ValueError):
         Buffer.from_pcm(ctx, b"\x00" * 100, AudioFormat.MONO16, -1)
 
 
@@ -109,3 +109,37 @@ def test_buffer_repr(ctx):
     assert "Buffer" in r
     buf.delete()
     assert "deleted" in repr(buf)
+
+
+@pytest.mark.parametrize("width", [3, 4])
+def test_wav_rejects_unsupported_sample_width(ctx, tmp_path, width):
+    path = tmp_path / "wide.wav"
+    with wave.open(str(path), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(width)
+        output.setframerate(8000)
+        output.writeframes(b"\0" * width * 10)
+    with pytest.raises(ValueError, match="sample width"):
+        Buffer.from_wav(ctx, str(path))
+
+
+def test_audio_format_is_int_enum():
+    from enum import IntEnum
+    assert isinstance(AudioFormat.MONO8, IntEnum)
+    assert AudioFormat(AL.AL_FORMAT_MONO16) is AudioFormat.MONO16
+
+
+def test_failed_upload_releases_allocated_buffer(ctx, monkeypatch):
+    from openal_py import _core
+    generated = []
+    gen_buffers = _core.gen_buffers
+
+    def record(n):
+        handles = gen_buffers(n)
+        generated.extend(handles)
+        return handles
+
+    monkeypatch.setattr(_core, "gen_buffers", record)
+    with pytest.raises(ALLError):
+        Buffer.from_pcm(ctx, b"\0", 0xDEAD, 8000)
+    assert generated and not _core.is_buffer(generated[0])

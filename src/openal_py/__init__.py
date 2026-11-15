@@ -8,12 +8,12 @@ Quick start::
 
     import openal_py as al
 
-    device = al.Device()
+    device = al.Device.default()
     with al.Context(device) as ctx:
-        listener = al.Listener()
+        listener = ctx.listener
         listener.position = (0.0, 1.6, 0.0)
 
-        buf = al.Buffer.from_wav("sound.wav")
+        buf = al.Buffer.from_wav(ctx, "sound.wav")
         src = ctx.create_source()
         src.buffer = buf
         src.play()

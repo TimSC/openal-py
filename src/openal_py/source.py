@@ -27,7 +27,10 @@ class Source:
     def __init__(self, context, handle: int):
         self._context = context
         self._handle = handle
-        _finalize.register(self, handle, _core.delete_sources)
+        self._buffer_refs = []
+        self._finalizer = _finalize.register(
+            self, handle, _core.delete_sources, self._buffer_refs
+        )
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -37,32 +40,35 @@ class Source:
 
     def delete(self) -> None:
         if self._handle is not None:
-            if getattr(self._context, "_handle", None) is None:
-                # context already destroyed; its objects die with it
-                self._handle = None
-                return
-            try:
-                _core.source_set(self._handle, AL.AL_BUFFER, 0)  # unbind buffer
-            except Exception:
-                pass
-            try:
-                _core.delete_sources([self._handle])
-            finally:
-                self._handle = None
+            _finalize.release(
+                self._context._state, self._handle, _core.delete_sources, self._buffer_refs
+            )
+            self._handle = None
+            if self._finalizer is not None:
+                self._finalizer.detach()
+
+    def _require_current(self):
+        if self._handle is None:
+            raise RuntimeError("source has been deleted")
+        self._context._require_current()
 
     # -- state --------------------------------------------------------------
 
     @property
     def state(self) -> SourceState:
+        self._require_current()
         return SourceState(_core.source_geti(self._handle, AL.AL_SOURCE_STATE))
 
     def play(self) -> None:
+        self._require_current()
         _core.source_play(self._handle)
 
     def pause(self) -> None:
+        self._require_current()
         _core.source_pause(self._handle)
 
     def stop(self) -> None:
+        self._require_current()
         _core.source_stop(self._handle)
 
     def is_playing(self) -> bool:
@@ -71,12 +77,15 @@ class Source:
     # -- scalar parameters ---------------------------------------------------
 
     def _set(self, pname, value) -> None:
+        self._require_current()
         _core.source_set(self._handle, pname, value)
 
     def _get(self, pname, n: int = 1):
+        self._require_current()
         return _core.source_get(self._handle, pname, n)
 
     def _geti(self, pname) -> int:
+        self._require_current()
         return _core.source_geti(self._handle, pname)
 
     @property
@@ -169,6 +178,8 @@ class Source:
         h = self._geti(AL.AL_BUFFER)
         if h == 0:
             return None
+        if self._buffer_refs and self._buffer_refs[0].handle == h:
+            return self._buffer_refs[0]
         return self._context.get_buffer(h) or Buffer(self._context, h, _owned=False)
 
     @buffer.setter
@@ -177,10 +188,15 @@ class Source:
         if value is None:
             h = 0
         elif isinstance(value, Buffer):
+            if value._context is not self._context:
+                raise ValueError("buffer belongs to a different context")
+            if value.handle is None:
+                raise ValueError("buffer has been deleted")
             h = value.handle
         else:
             raise TypeError(f"expected Buffer or None, got {type(value)!r}")
         self._set(AL.AL_BUFFER, h)
+        self._buffer_refs[:] = [] if value is None else [value]
 
     def __repr__(self) -> str:
         return f"Source(handle={self._handle}, state={self.state.name if self._handle is not None else 'deleted'})"

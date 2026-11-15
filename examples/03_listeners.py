@@ -1,7 +1,7 @@
 """Listener: the virtual head of the listener in 3D space.
 
-The listener state is global to the process (OpenAL semantics); the
-Listener class is just a convenient handle for it.
+Each context has its own listener state. Listener objects bind to one
+context and require it to be current.
 
 Run with:  python examples/03_listeners.py
 """
@@ -12,7 +12,7 @@ def main() -> None:
     device = Device.default()
     ctx = Context(device)
     with ctx:
-        L = Listener()
+        L = ctx.listener
 
         # Where the head is, and which way it faces
         L.position = (0.0, 0.0, 0.0)
@@ -26,11 +26,11 @@ def main() -> None:
         L.velocity = (0.0, 0.0, -5.0)
         print("velocity:  ", L.velocity)
 
-        # Global master volume (1.0 = unchanged)
+        # Context master volume (1.0 = unchanged)
         L.gain = 0.8
         print("gain:      ", L.gain)
 
-        # A second Listener object sees the same global state
+        # A second Listener object bound to this context sees the same state
         L2 = Listener()
         print("same state via L2:", L2.position, L2.gain)
 

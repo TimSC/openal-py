@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import wave
 import weakref
-from dataclasses import dataclass
+from enum import IntEnum
 from typing import Optional
 
 from openal_py import _core
@@ -11,10 +11,8 @@ from openal_py import _finalize
 from openal_py._constants import AL
 
 
-@dataclass(frozen=True)
-class AudioFormat:
+class AudioFormat(IntEnum):
     """OpenAL sample format (AL_FORMAT_*)."""
-    value: int
 
     MONO8 = AL.AL_FORMAT_MONO8
     MONO16 = AL.AL_FORMAT_MONO16
@@ -32,8 +30,9 @@ class Buffer:
     def __init__(self, context, handle: int, _owned: bool = True):
         self._context = context
         self._handle = handle
+        self._finalizer = None
         if _owned:
-            _finalize.register(self, handle, _core.delete_buffers)
+            self._finalizer = _finalize.register(self, handle, _core.delete_buffers)
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -43,14 +42,10 @@ class Buffer:
 
     def delete(self) -> None:
         if self._handle is not None:
-            if getattr(self._context, "_handle", None) is None:
-                # context already destroyed; its objects die with it
-                self._handle = None
-                return
-            try:
-                _core.delete_buffers([self._handle])
-            finally:
-                self._handle = None
+            _finalize.release(self._context._state, self._handle, _core.delete_buffers)
+            self._handle = None
+            if self._finalizer is not None:
+                self._finalizer.detach()
 
     # -- construction --------------------------------------------------------
 
@@ -58,17 +53,22 @@ class Buffer:
     def from_pcm(cls, context, data: bytes, format: AudioFormat | int,
                  frequency: int) -> "Buffer":
         """Create a buffer from raw interleaved PCM data."""
+        context._require_current()
         buf = cls(context, _core.gen_buffers(1)[0])
         fmt = format.value if isinstance(format, AudioFormat) else format
-        _core.buffer_data(buf._handle, fmt, data, frequency)
+        try:
+            _core.buffer_data(buf._handle, fmt, data, frequency)
+        except Exception:
+            buf.delete()
+            raise
         context._buffers[buf._handle] = weakref.ref(buf)
         return buf
 
     # format value -> (soundfile dtype, channel count)
     _SF_FORMATS = {
-        AL.AL_FORMAT_MONO8: ("uint8", 1),
+        AL.AL_FORMAT_MONO8: ("int16", 1),
         AL.AL_FORMAT_MONO16: ("int16", 1),
-        AL.AL_FORMAT_STEREO8: ("uint8", 2),
+        AL.AL_FORMAT_STEREO8: ("int16", 2),
         AL.AL_FORMAT_STEREO16: ("int16", 2),
     }
 
@@ -100,7 +100,9 @@ class Buffer:
                 f"file has {n_ch} channel(s), format expects {channels}; "
                 "pass a matching format"
             )
-        return cls.from_pcm(context, data.tobytes(), fmt, int(rate))  # noqa
+        if fmt in (AL.AL_FORMAT_MONO8, AL.AL_FORMAT_STEREO8):
+            data = ((data.astype("int32") >> 8) + 128).astype("uint8")
+        return cls.from_pcm(context, data.tobytes(), fmt, int(rate))
 
     @classmethod
     def from_wav(cls, context, filename: str) -> "Buffer":
@@ -110,6 +112,8 @@ class Buffer:
             sample_width = w.getsampwidth()
             frequency = w.getframerate()
             data = w.readframes(w.getnframes())
+        if sample_width not in (1, 2):
+            raise ValueError(f"unsupported sample width: {sample_width} bytes")
         if channels == 1:
             fmt = AudioFormat.MONO16 if sample_width == 2 else AudioFormat.MONO8
         elif channels == 2:
@@ -118,18 +122,26 @@ class Buffer:
             raise ValueError(f"unsupported channel count: {channels}")
         return cls.from_pcm(context, data, fmt, frequency)
 
+    def _require_current(self):
+        if self._handle is None:
+            raise RuntimeError("buffer has been deleted")
+        self._context._require_current()
+
     # -- info -------------------------------------------------------------------
 
     @property
     def frequency(self) -> int:
+        self._require_current()
         return _core.buffer_geti(self._handle, AL.AL_FREQUENCY)
 
     @property
     def channels(self) -> int:
+        self._require_current()
         return _core.buffer_geti(self._handle, AL.AL_CHANNELS)
 
     @property
     def size(self) -> int:
+        self._require_current()
         return _core.buffer_geti(self._handle, AL.AL_SIZE)
 
     def __repr__(self) -> str:

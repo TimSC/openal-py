@@ -26,6 +26,29 @@ with ctx:  # makes the context current
     src.stop()
 ```
 
+## Context ownership and cleanup
+
+Source, buffer, and listener operations require their owning context to be
+current. Use `with ctx:` around playback and parameter access; nested blocks
+restore the previous context, including when an exception is raised.
+`ctx.listener` returns a listener bound to `ctx`. `Listener()` binds to the
+current managed context at construction and keeps that binding when contexts
+switch. Operations on deleted objects or destroyed contexts raise `RuntimeError`.
+
+A source retains its attached buffer until the buffer is replaced, unbound with
+`source.buffer = None`, or the source is deleted. Assigning a buffer from a
+different context or a deleted buffer raises `ValueError`.
+
+`source.delete()` and `buffer.delete()` temporarily activate their owning context
+for cleanup and restore the previous context. Failed deletion keeps the handle
+available for retry. Explicitly destroy contexts before closing their devices;
+`with ctx:` controls which context is current and does not destroy it on exit.
+
+`AudioFormat` is an `IntEnum`; plain integer OpenAL format constants are also
+accepted. WAV loading supports 8/16-bit mono/stereo PCM and rejects other sample
+widths. The optional soundfile loader converts samples to unsigned PCM when an
+8-bit format is requested.
+
 ## Examples
 
 Runnable examples live in `examples/` (also shipped inside the wheel at

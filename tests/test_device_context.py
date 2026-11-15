@@ -135,3 +135,31 @@ def test_attributes_passed_through(device):
         assert c.is_current is False
     finally:
         c.destroy()
+
+
+@pytest.mark.parametrize("same_context", [False, True])
+@pytest.mark.parametrize("raises", [False, True])
+def test_nested_context_restores_outer(ctx, device, same_context, raises):
+    inner = ctx if same_context else Context(device)
+    try:
+        if raises:
+            with pytest.raises(ValueError):
+                with inner:
+                    assert inner.is_current
+                    raise ValueError("test")
+        else:
+            with inner:
+                assert inner.is_current
+        assert ctx.is_current
+    finally:
+        if not same_context:
+            inner.destroy()
+
+
+def test_make_current_returns_actual_previous_handle(ctx, device):
+    other = Context(device)
+    try:
+        assert other.make_current() == ctx.handle
+        assert ctx.make_current() == other.handle
+    finally:
+        other.destroy()

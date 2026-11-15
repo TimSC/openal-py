@@ -1,29 +1,60 @@
-"""Weakref-based C-handle cleanup without reference cycles.
-
-``weakref.finalize(obj, callback)`` fires only *after* ``obj`` is dead, so the
-callback can't touch the object.  A bound method (``obj._delete``) would also
-keep ``obj`` alive forever.  So each owning object registers its raw C handle
-(an int, not the object) plus the low-level delete callable; the finalizer
-releases the C handle directly once the Python wrapper is gone.
-"""
+"""Resource cleanup state that never retains its Python wrapper."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import weakref
 
+from openal_py import _core
 
-def register(obj, handle, delete) -> None:
-    """Release *handle* (via ``delete([handle])``) when *obj* is collected.
 
-    *delete* is the low-level core function (e.g. ``_core.delete_buffers``).
-    Safe to call repeatedly; the finalizer fires at most once.
-    """
-    if handle is None:
-        return
+class ContextState:
+    """Keep the device alive and share context liveness with child finalizers."""
 
-    def _release() -> None:
+    def __init__(self, handle, device):
+        self.handle = handle
+        self.device = device
+
+    @contextmanager
+    def current(self):
+        if self.handle is None:
+            raise RuntimeError("context has been destroyed")
+        previous = _core.get_current_context()
+        changed = previous != self.handle
+        if changed:
+            if not _core.make_context_current(self.handle):
+                raise RuntimeError("could not make context current")
         try:
-            delete([handle])
-        except Exception:
-            pass
+            yield
+        finally:
+            if changed:
+                _core.make_context_current(previous or None)
 
-    weakref.finalize(obj, _release)
+    def destroy(self):
+        if self.handle is not None:
+            if _core.get_current_context() == self.handle:
+                _core.make_context_current(None)
+            _core.destroy_context(self.handle)
+            self.handle = None
+
+
+def quietly(callback, *args):
+    """Best-effort cleanup for GC; explicit cleanup still reports failures."""
+    try:
+        callback(*args)
+    except Exception:
+        pass
+
+
+def release(context_state, handle, delete, keepalive=None):
+    if context_state.handle is not None:
+        with context_state.current():
+            delete([handle])
+    if keepalive is not None:
+        keepalive.clear()
+
+
+def register(obj, handle, delete, keepalive=None):
+    """Return a cancellable finalizer routed through the owning context."""
+    return weakref.finalize(
+        obj, quietly, release, obj._context._state, handle, delete, keepalive
+    )
