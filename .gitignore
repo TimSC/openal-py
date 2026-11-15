@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# OpenAL-soft submodule build artifacts (the submodule's own .gitignore
+# covers its source tree; keep its build dir out of the superproject)
+openal-soft/build/
+
+# meson-python / test scratch
+.mesonpy-*/
+.pytest_cache/

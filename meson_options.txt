@@ -1,0 +1,12 @@
+option(
+    'openal_libdir',
+    type: 'string',
+    value: 'openal-soft/build',
+    description: 'Directory (relative to repo root) containing the libopenal shared library to link (and bundle)',
+)
+option(
+    'bundle_openal',
+    type: 'boolean',
+    value: true,
+    description: 'Install the libopenal shared library into the package directory',
+)
