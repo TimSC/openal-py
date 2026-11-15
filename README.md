@@ -109,3 +109,41 @@ Building a wheel:
 ```sh
 pip wheel . -w dist/
 ```
+
+## Building wheels for PyPI
+
+PyPI does not accept generic `linux_x86_64` wheels, so the Linux wheels are
+built inside a manylinux container and repaired with `auditwheel`:
+
+```sh
+tools/build_manylinux_wheels.sh                      # CPython 3.10-3.13
+tools/build_manylinux_wheels.sh --python-tags "cp311-cp311 cp312-cp312"
+CONTAINER_ENGINE=podman tools/build_manylinux_wheels.sh
+```
+
+The script builds `libopenal` from the `openal-soft/` submodule with the
+image's own toolchain (into `openal-soft/build`, the meson default), then
+builds and repairs one wheel per interpreter into `wheelhouse/`. The default
+image is `quay.io/pypa/manylinux_2_28_x86_64`: openal-soft 1.25 needs C++20
+(gcc 11+), which that image's gcc-toolset-14 provides (manylinux2014's gcc
+4.8 cannot build it). `--image` picks another policy; missing interpreters
+are skipped with a warning.
+
+Windows wheels are built natively (64-bit Windows, Visual Studio Build
+Tools, CMake and the `py` launcher):
+
+```powershell
+.\tools\build_windows_wheels.ps1                      # CPython 3.10-3.14
+.\tools\build_windows_wheels.ps1 -PythonVersions 3.11,3.12
+```
+
+It builds `openal.dll` from the submodule, one `win_amd64` wheel per
+version, checks that the wheel contains exactly one `openal_py/openal.dll`,
+validates with twine, and collects everything in `wheelhouse/`.
+
+Validate and upload:
+
+```sh
+python3 -m twine check wheelhouse/*.whl
+python3 -m twine upload wheelhouse/*.whl
+```

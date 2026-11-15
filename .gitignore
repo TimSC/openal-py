@@ -15,3 +15,4 @@ openal-soft/build/
 # meson-python / test scratch
 .mesonpy-*/
 .pytest_cache/
+wheelhouse/
