@@ -32,7 +32,7 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER_ENGINE="${CONTAINER_ENGINE:-docker}"
 MANYLINUX_IMAGE="${MANYLINUX_IMAGE:-quay.io/pypa/manylinux_2_28_x86_64}"
 # Build these interpreter versions by default; additional tags can be requested.
-PYTHON_TAGS="${PYTHON_TAGS:-cp310-cp310 cp311-cp311 cp312-cp312 cp313-cp313}"
+PYTHON_TAGS="${PYTHON_TAGS:-cp311-cp311 cp312-cp312 cp313-cp313 cp314-cp314 cp315-cp315}"
 WHEELHOUSE="${WHEELHOUSE:-"$ROOT_DIR/wheelhouse"}"
 JOBS="${JOBS:-$(nproc)}"
 

@@ -7,7 +7,7 @@
 #       winget install 9NQ7512CXL7T -e --accept-package-agreements --disable-interactivity
 #
 # For each required version of Python:
-#       py install 3.14
+#       py install 3.15
 #
 # Then, from the repo root:
 #       .\tools\build_windows_wheels.ps1
@@ -25,7 +25,7 @@
 param(
     [string]$OpenAlSource = "",
     [string]$OpenAlBinaryDistribution = "",
-    [string[]]$PythonVersions = @("3.10", "3.11", "3.12", "3.13", "3.14"),
+    [string[]]$PythonVersions = @("3.11", "3.12", "3.13", "3.14", "3.15"),
     [string]$Wheelhouse = "",
     [switch]$SkipDependencyInstall,
     [switch]$KeepBuildArtifacts

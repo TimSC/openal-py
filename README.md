@@ -397,7 +397,7 @@ PyPI does not accept generic `linux_x86_64` wheels, so the Linux wheels are
 built inside a manylinux container and repaired with `auditwheel`:
 
 ```sh
-tools/build_manylinux_wheels.sh                      # CPython 3.10-3.13
+tools/build_manylinux_wheels.sh                      # CPython 3.11-3.15
 tools/build_manylinux_wheels.sh --python-tags "cp311-cp311 cp312-cp312"
 CONTAINER_ENGINE=podman tools/build_manylinux_wheels.sh
 ```
@@ -426,7 +426,7 @@ Windows wheels are built natively (64-bit Windows, Visual Studio Build
 Tools, CMake and the `py` launcher):
 
 ```powershell
-.\tools\build_windows_wheels.ps1                      # CPython 3.10-3.14
+.\tools\build_windows_wheels.ps1                      # CPython 3.11-3.15
 .\tools\build_windows_wheels.ps1 -PythonVersions 3.11,3.12
 ```
 
