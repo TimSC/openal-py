@@ -53,5 +53,8 @@ if get_option('bundle_openal')
     else
         libfile = openal_libdir / 'libopenal.so.1'
     endif
-    install_data(libfile, follow_symlinks: true, install_dir: py.get_install_dir() / 'openal_py')
+    install_data(libfile, follow_symlinks: true,
+        install_dir: py.get_install_dir() / 'openal_py',
+        install_tag: 'runtime',
+    )
 endif

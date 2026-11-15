@@ -148,6 +148,7 @@ try {
         throw "OpenAL DLL missing: $OpenAlDll."
     }
 
+    $OriginalPath = $env:PATH
     Push-Location $Project
     try {
         foreach ($Version in $PythonVersions) {
@@ -160,6 +161,15 @@ try {
                     throw "Failed to install build dependencies for CPython $Version."
                 }
             }
+
+            # pip-installed commands are not necessarily on PATH, especially
+            # with launcher-managed Python installs or pip's --user fallback.
+            # Select this interpreter's tools for Meson, Ninja and Cython.
+            $ScriptDirs = @(& py "-$Version-64" -c "import sysconfig; print(sysconfig.get_path('scripts')); print(sysconfig.get_path('scripts', scheme=sysconfig.get_preferred_scheme('user')))")
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not locate script directories for CPython $Version."
+            }
+            $env:PATH = ($ScriptDirs + @($OriginalPath)) -join [System.IO.Path]::PathSeparator
 
             $RawWheelDir = Join-Path $WorkDir "raw/$Version"
             New-Item -ItemType Directory -Force -Path $RawWheelDir | Out-Null
@@ -190,6 +200,7 @@ try {
         }
     }
     finally {
+        $env:PATH = $OriginalPath
         Pop-Location
     }
 }

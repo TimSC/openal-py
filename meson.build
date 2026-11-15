@@ -17,4 +17,5 @@ subdir('src/openal_py')
 install_subdir(
     'examples',
     install_dir: py.get_install_dir() / 'openal_py',
+    install_tag: 'runtime',
 )

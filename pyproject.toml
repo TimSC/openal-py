@@ -2,6 +2,10 @@
 requires = ["meson-python>=0.16.0", "meson>=1.11", "ninja>=1.11", "cython>=3.0"]
 build-backend = "mesonpy"
 
+[tool.meson-python.args]
+# Exclude development artifacts such as MSVC import libraries from wheels.
+install = ["--tags=runtime,python-runtime"]
+
 [project]
 name = "openal-py"
 version = "0.1.0"

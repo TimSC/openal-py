@@ -422,8 +422,25 @@ default image is
 cannot build it). `--image` picks another policy; missing interpreters
 are skipped with a warning.
 
-Windows wheels are built natively (64-bit Windows, Visual Studio Build
-Tools, CMake and the `py` launcher):
+Run the PowerShell build script on 64-bit Windows with Visual Studio Build
+Tools (the C++ workload). CMake must be on PATH when building OpenAL from
+source.
+
+Install the Python install manager to provide the `py` command:
+
+```powershell
+winget install 9NQ7512CXL7T -e --accept-package-agreements --disable-interactivity
+```
+
+Install the 64-bit Python versions you want to build for before running the
+script. The default builds require CPython 3.11 through 3.15:
+
+```powershell
+py install 3.11 3.12 3.13 3.14 3.15
+```
+
+The script checks for these interpreters and installs their build dependencies,
+but does not install missing Python versions. From the repository root, run:
 
 ```powershell
 .\tools\build_windows_wheels.ps1                      # CPython 3.11-3.15
