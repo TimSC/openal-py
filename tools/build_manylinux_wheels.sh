@@ -97,12 +97,18 @@ rm -f "$WHEELHOUSE"/*.whl
         set -euo pipefail
 
         echo "Building libopenal with the image toolchain..."
+        dnf install -y alsa-lib-devel pulseaudio-libs-devel pipewire-devel
         rm -rf openal-soft/build
+        # PipeWire is built if found, not required: the pipewire in the image
+        # (0.3.6) is older than the 0.3.23 openal-soft needs.
         cmake -S openal-soft -B openal-soft/build \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=ON \
             -DENABLE_ALSOFT_EXAMPLES=OFF \
-            -DBUILD_TESTING=OFF
+            -DBUILD_TESTING=OFF \
+            -DALSOFT_REQUIRE_ALSA=ON \
+            -DALSOFT_REQUIRE_PULSEAUDIO=ON \
+            -DALSOFT_BACKEND_PIPEWIRE=ON
         cmake --build openal-soft/build -j "$JOBS"
         test -f openal-soft/build/libopenal.so.1
 
@@ -131,6 +137,9 @@ rm -f "$WHEELHOUSE"/*.whl
                 --outdir "$raw_dir"
 
             "$python" -m auditwheel show "$raw_dir"/*.whl
+            # The audio libraries are dlopen()ed by the backends at runtime
+            # (recorded in the .note.gnu.dlopen section), so auditwheel knows
+            # to leave them out of the wheel.
             "$python" -m auditwheel repair "$raw_dir"/*.whl --wheel-dir /wheelhouse
             for wheel in /wheelhouse/*.whl; do
                 "$python" -m twine check "$wheel"

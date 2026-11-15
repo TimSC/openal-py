@@ -123,10 +123,16 @@ CONTAINER_ENGINE=podman tools/build_manylinux_wheels.sh
 
 The script builds `libopenal` from the `openal-soft/` submodule with the
 image's own toolchain (into `openal-soft/build`, the meson default), then
-builds and repairs one wheel per interpreter into `wheelhouse/`. The default
-image is `quay.io/pypa/manylinux_2_28_x86_64`: openal-soft 1.25 needs C++20
-(gcc 11+), which that image's gcc-toolset-14 provides (manylinux2014's gcc
-4.8 cannot build it). `--image` picks another policy; missing interpreters
+builds and repairs one wheel per interpreter into `wheelhouse/`. The
+ALSA and PulseAudio backends are required, and PipeWire is built if found
+(their dev packages are installed from the image's repos; its pipewire is
+too old for openal-soft, so the backend is currently absent). The audio
+libraries are not bundled — the backends dlopen them at runtime, so on
+systems without them the matching backends are simply unavailable. The
+default image is
+`quay.io/pypa/manylinux_2_28_x86_64`: openal-soft 1.25 needs C++20 (gcc
+11+), which that image's gcc-toolset-14 provides (manylinux2014's gcc 4.8
+cannot build it). `--image` picks another policy; missing interpreters
 are skipped with a warning.
 
 Windows wheels are built natively (64-bit Windows, Visual Studio Build
