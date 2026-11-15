@@ -164,6 +164,20 @@ def get_extensions() -> list:
     return s.split() if s else []
 
 
+def get_string(pname) -> str:
+    """alGetString for the current context (None if unavailable)."""
+    s = _cstr(_al_api.alGetString(<ALenum> pname))
+    _check_al()
+    return s
+
+
+def alc_get_string(device, pname) -> str:
+    """Raw alcGetString string (may contain NUL separators)."""
+    s = _cstr(_al_api.alcGetString(_dev(device), <ALCenum> pname))
+    _check_alc(device)
+    return s
+
+
 def is_extension_present(name: str) -> bool:
     """Check an AL extension (requires a current context)."""
     _check_al()
@@ -183,7 +197,7 @@ def is_alc_extension_present(name: str, device=None) -> bool:
 
 def enumerate_devices() -> list:
     """Names of available devices (null-separated list from ALC)."""
-    s = _cstr(_al_api.alcGetString(<ALCdevice*> NULL, 0x1005))  # ALC_DEVICE_SPECIFIER
+    s = _cstr(_al_api.alcGetString(<ALCdevice*> NULL, 0x1013))  # ALC_ALL_DEVICES_SPECIFIER
     _check_alc(None)
     return [d for d in (s or "").split("\x00") if d]
 
@@ -280,9 +294,29 @@ def get_integer(device, pname) -> int:
     return v
 
 
+def get_integerv(device, pname, n: int = 1) -> list:
+    """Query several device attributes (via alcGetIntegerv)."""
+    cdef ALCint* buf = <ALCint*> calloc(n, 4)
+    cdef int64_t i
+    try:
+        _al_api.alcGetIntegerv(_dev(device), <ALCenum> pname, <ALsizei> n, buf)
+        _check_alc(device)
+        return [buf[i] for i in range(n)]
+    finally:
+        free(buf)
+
+
 # ---------------------------------------------------------------------------
 # Listener (AL)
 # ---------------------------------------------------------------------------
+
+cdef inline bint _all_ints(object v):
+    cdef int64_t i
+    for i in range(len(v)):
+        if not isinstance(v[i], (int, bool)) or isinstance(v[i], float):
+            return False
+    return True
+
 
 def listener_set(pname, value) -> None:
     cdef ALenum p = <ALenum> pname
@@ -293,6 +327,8 @@ def listener_set(pname, value) -> None:
             _al_api.alListeneri(p, <ALint> value)
         elif isinstance(value, float):
             _al_api.alListenerf(p, <ALfloat> value)
+        elif isinstance(value, (tuple, list)) and len(value) == 3 and _all_ints(value):
+            _al_api.alListener3i(p, <ALint> value[0], <ALint> value[1], <ALint> value[2])
         elif isinstance(value, (tuple, list)) and len(value) == 3:
             _al_api.alListener3f(p, <ALfloat> value[0], <ALfloat> value[1], <ALfloat> value[2])
         elif isinstance(value, (tuple, list)) and len(value) == 6:
@@ -385,6 +421,8 @@ def source_set(source, pname, value) -> None:
             _al_api.alSourcef(s, p, <ALfloat> value)
         elif isinstance(value, (tuple, list)) and len(value) == 1:
             _al_api.alSourcef(s, p, <ALfloat> value[0])
+        elif isinstance(value, (tuple, list)) and len(value) == 3 and _all_ints(value):
+            _al_api.alSource3i(s, p, <ALint> value[0], <ALint> value[1], <ALint> value[2])
         elif isinstance(value, (tuple, list)) and len(value) == 3:
             _al_api.alSource3f(s, p, <ALfloat> value[0], <ALfloat> value[1], <ALfloat> value[2])
         else:
@@ -415,6 +453,30 @@ def source_geti(source, pname) -> int:
     _al_api.alGetSourcei(<ALuint> source, <ALenum> pname, &v)
     _check_al()
     return v
+
+
+def source_queue_buffers(source, buffers) -> None:
+    cdef int64_t n = len(buffers)
+    cdef int64_t i
+    cdef ALuint* arr = <ALuint*> calloc(n, 4)
+    try:
+        for i in range(n):
+            arr[i] = <ALuint> buffers[i]
+        _al_api.alSourceQueueBuffers(<ALuint> source, <ALsizei> n, arr)
+        _check_al()
+    finally:
+        free(arr)
+
+
+def source_unqueue_buffers(source, n: int) -> list:
+    cdef int64_t i
+    cdef ALuint* arr = <ALuint*> calloc(n, 4)
+    try:
+        _al_api.alSourceUnqueueBuffers(<ALuint> source, <ALsizei> n, arr)
+        _check_al()
+        return [arr[i] for i in range(n)]
+    finally:
+        free(arr)
 
 
 # ---------------------------------------------------------------------------
@@ -485,3 +547,180 @@ def get_int(pname) -> int:
 def speed_of_sound(value: float) -> None:
     _al_api.alSpeedOfSound(<ALfloat> value)
     _check_al()
+
+
+def doppler_factor(value: float) -> None:
+    _al_api.alDopplerFactor(<ALfloat> value)
+    _check_al()
+
+
+def doppler_velocity(value: float) -> None:
+    _al_api.alDopplerVelocity(<ALfloat> value)
+    _check_al()
+
+
+def distance_model(model) -> None:
+    _al_api.alDistanceModel(<ALenum> model)
+    _check_al()
+
+
+# ---------------------------------------------------------------------------
+# Pollable error codes (in addition to the check-and-raise above)
+# ---------------------------------------------------------------------------
+
+def get_error() -> int:
+    """alGetError: return (and clear) the last AL error code."""
+    return _al_api.alGetError()
+
+
+def alc_get_error(device) -> int:
+    """alcGetError: return (and clear) the last ALC error code."""
+    return _al_api.alcGetError(_dev(device))
+
+
+# ---------------------------------------------------------------------------
+# EFX (AL_EXT_EFX)
+# ---------------------------------------------------------------------------
+
+def gen_effects(n: int = 1) -> list:
+    cdef int64_t count = <int64_t> n
+    cdef ALuint* arr = <ALuint*> calloc(count, 4)
+    try:
+        _al_api.alGenEffects(count, arr)
+        _check_al()
+        return [arr[i] for i in range(count)]
+    finally:
+        free(arr)
+
+
+def delete_effects(effects) -> None:
+    cdef int64_t n = len(effects)
+    cdef int64_t i
+    cdef ALuint* arr = <ALuint*> calloc(n, 4)
+    try:
+        for i in range(n):
+            arr[i] = <ALuint> effects[i]
+        _al_api.alDeleteEffects(<ALsizei> n, arr)
+        _check_al()
+    finally:
+        free(arr)
+
+
+def effect_set(effect, pname, value) -> None:
+    """Set an effect parameter: scalar float/int, or a float list."""
+    cdef ALuint e = <ALuint> effect
+    cdef ALenum p = <ALenum> pname
+    cdef ALfloat* buf
+    cdef int64_t n, i
+    try:
+        if isinstance(value, (int, bool)) and not isinstance(value, float):
+            _al_api.alEffecti(e, p, <ALint> value)
+        elif isinstance(value, float):
+            _al_api.alEffectf(e, p, <ALfloat> value)
+        elif isinstance(value, (tuple, list)):
+            n = len(value)
+            buf = <ALfloat*> calloc(n, 4)
+            for i in range(n):
+                buf[i] = <ALfloat> value[i]
+            _al_api.alEffectfv(e, p, buf)
+            free(buf)
+        else:
+            raise TypeError(f"effect_set: unsupported value for {pname!r}")
+    finally:
+        _check_al()
+
+
+def gen_filters(n: int = 1) -> list:
+    cdef int64_t count = <int64_t> n
+    cdef ALuint* arr = <ALuint*> calloc(count, 4)
+    try:
+        _al_api.alGenFilters(count, arr)
+        _check_al()
+        return [arr[i] for i in range(count)]
+    finally:
+        free(arr)
+
+
+def delete_filters(filters) -> None:
+    cdef int64_t n = len(filters)
+    cdef int64_t i
+    cdef ALuint* arr = <ALuint*> calloc(n, 4)
+    try:
+        for i in range(n):
+            arr[i] = <ALuint> filters[i]
+        _al_api.alDeleteFilters(<ALsizei> n, arr)
+        _check_al()
+    finally:
+        free(arr)
+
+
+def filter_set(f, pname, value) -> None:
+    """Set a filter parameter: scalar float/int, or a float list."""
+    cdef ALuint flt = <ALuint> f
+    cdef ALenum p = <ALenum> pname
+    cdef ALfloat* buf
+    cdef int64_t n, i
+    try:
+        if isinstance(value, (int, bool)) and not isinstance(value, float):
+            _al_api.alFilteri(flt, p, <ALint> value)
+        elif isinstance(value, float):
+            _al_api.alFilterf(flt, p, <ALfloat> value)
+        elif isinstance(value, (tuple, list)):
+            n = len(value)
+            buf = <ALfloat*> calloc(n, 4)
+            for i in range(n):
+                buf[i] = <ALfloat> value[i]
+            _al_api.alFilterfv(flt, p, buf)
+            free(buf)
+        else:
+            raise TypeError(f"filter_set: unsupported value for {pname!r}")
+    finally:
+        _check_al()
+
+
+def gen_auxiliary_effect_slots(n: int = 1) -> list:
+    cdef int64_t count = <int64_t> n
+    cdef ALuint* arr = <ALuint*> calloc(count, 4)
+    try:
+        _al_api.alGenAuxiliaryEffectSlots(count, arr)
+        _check_al()
+        return [arr[i] for i in range(count)]
+    finally:
+        free(arr)
+
+
+def delete_auxiliary_effect_slots(slots) -> None:
+    cdef int64_t n = len(slots)
+    cdef int64_t i
+    cdef ALuint* arr = <ALuint*> calloc(n, 4)
+    try:
+        for i in range(n):
+            arr[i] = <ALuint> slots[i]
+        _al_api.alDeleteAuxiliaryEffectSlots(<ALsizei> n, arr)
+        _check_al()
+    finally:
+        free(arr)
+
+
+def auxiliary_effect_slot_set(slot, pname, value) -> None:
+    """Set an auxiliary effect slot parameter: scalar float/int, or a float list."""
+    cdef ALuint sl = <ALuint> slot
+    cdef ALenum p = <ALenum> pname
+    cdef ALfloat* buf
+    cdef int64_t n, i
+    try:
+        if isinstance(value, (int, bool)) and not isinstance(value, float):
+            _al_api.alAuxiliaryEffectSloti(sl, p, <ALint> value)
+        elif isinstance(value, float):
+            _al_api.alAuxiliaryEffectSlotf(sl, p, <ALfloat> value)
+        elif isinstance(value, (tuple, list)):
+            n = len(value)
+            buf = <ALfloat*> calloc(n, 4)
+            for i in range(n):
+                buf[i] = <ALfloat> value[i]
+            _al_api.alAuxiliaryEffectSlotfv(sl, p, buf)
+            free(buf)
+        else:
+            raise TypeError(f"auxiliary_effect_slot_set: unsupported value for {pname!r}")
+    finally:
+        _check_al()
