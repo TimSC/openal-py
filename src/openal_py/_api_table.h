@@ -11,7 +11,8 @@
 extern "C" {
 #endif
 
-int openal_py_init(const char* libpath);
+int openal_py_init(const char* libpath, int require_devices);
+int openal_py_has_symbol(const char* name);
 const char* openal_py_library_path(void);
 
 void alEnable(ALenum capability);

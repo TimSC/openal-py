@@ -2,7 +2,7 @@ option(
     'openal_libdir',
     type: 'string',
     value: 'openal-soft/build',
-    description: 'Directory (relative to repo root) containing the libopenal shared library to link (and bundle)',
+    description: 'Directory (relative to repo root) containing the libopenal shared library to bundle',
 )
 option(
     'bundle_openal',

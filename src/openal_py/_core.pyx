@@ -1,10 +1,8 @@
 """Thin Cython core: typed, error-checked wrappers over the OpenAL C API.
 
-The actual function bodies live in the (bundled) libopenal shared library.
-All calls go through the generated _api_table trampolines, which resolves
-symbols via dlopen at import time:
-  - default: the bundled library installed next to this module
-  - override: $OPENAL_PY_LIBRARY pointing at any libopenal.so
+The actual function bodies live in the selected OpenAL shared library.
+All calls go through generated _api_table trampolines, resolving symbols at
+import time from the bundle, a system implementation, or OPENAL_PY_LIBRARY.
 
 This module is deliberately un-pythonic. Build object models on top
 (openal_py.source, openal_py.buffer, ...).
@@ -105,23 +103,16 @@ def _bundled_lib_path() -> bytes:
     return base + b"/" + name
 
 
-def _init():
-    """Resolve OpenAL symbols. Called at import time."""
+def _load_library(path, require_devices=False):
     import os
-    cdef const char* path = NULL
-    cdef bytes lib_bytes
-    lib = os.environ.get("OPENAL_PY_LIBRARY")
-    if lib:
-        lib_bytes = lib.encode("utf-8")
-        path = lib_bytes
-    else:
-        lib_bytes = _bundled_lib_path()
-        path = lib_bytes
-    if not _al_api.openal_py_init(path):
-        raise ImportError(
-            "openal_py: failed to initialize OpenAL library"
-            + (f" ({lib})" if lib else f" ({lib_bytes.decode()})")
-        )
+    cdef bytes encoded = os.fsencode(path)
+    return bool(_al_api.openal_py_init(encoded, require_devices))
+
+
+def _init():
+    """Choose a library once, before any native handles exist."""
+    from openal_py._loader import initialize
+    initialize(_bundled_lib_path(), _load_library)
 
 
 _init()
@@ -227,9 +218,22 @@ def is_alc_extension_present(name: str, device=None) -> bool:
 
 def enumerate_devices() -> list:
     """Names of available devices (null-separated list from ALC)."""
-    s = _cstr(_al_api.alcGetString(<ALCdevice*> NULL, 0x1013))  # ALC_ALL_DEVICES_SPECIFIER
+    cdef ALCenum param = 0x1005
+    if _al_api.alcIsExtensionPresent(NULL, b"ALC_ENUMERATE_ALL_EXT"):
+        param = 0x1013
+    elif not _al_api.alcIsExtensionPresent(NULL, b"ALC_ENUMERATION_EXT"):
+        name = _cstr(_al_api.alcGetString(NULL, 0x1004))
+        _check_alc(None)
+        return [name] if name else []
+    cdef const char* names = _al_api.alcGetString(NULL, param)
     _check_alc(None)
-    return [d for d in (s or "").split("\x00") if d]
+    result = []
+    if names != NULL:
+        while names[0] != 0:
+            name_bytes = <bytes> names
+            result.append(name_bytes.decode("utf-8"))
+            names += len(name_bytes) + 1
+    return result
 
 
 def open_device(name: str | None = None) -> int:
@@ -238,7 +242,7 @@ def open_device(name: str | None = None) -> int:
     cdef bytes name_bytes
     cdef const ALchar* n = NULL
     if name:
-        name_bytes = name.encode("ascii")
+        name_bytes = name.encode("utf-8")
         n = name_bytes
     dev = _al_api.alcOpenDevice(n)
     if dev == NULL:
@@ -616,7 +620,13 @@ def alc_get_error(device) -> int:
 # EFX (AL_EXT_EFX)
 # ---------------------------------------------------------------------------
 
+cdef void _require_symbol(bytes name) except *:
+    if not _al_api.openal_py_has_symbol(name):
+        raise NotImplementedError(f"loaded OpenAL does not provide {name.decode('ascii')}")
+
+
 def gen_effects(n: int = 1) -> list:
+    _require_symbol(b"alGenEffects")
     cdef int64_t count = _count(n)
     cdef ALuint* arr = <ALuint*> _allocate(count, sizeof(ALuint))
     try:
@@ -628,6 +638,7 @@ def gen_effects(n: int = 1) -> list:
 
 
 def delete_effects(effects) -> None:
+    _require_symbol(b"alDeleteEffects")
     cdef int64_t n = len(effects)
     cdef int64_t i
     cdef ALuint* arr = <ALuint*> _allocate(n, sizeof(ALuint))
@@ -642,6 +653,10 @@ def delete_effects(effects) -> None:
 
 def effect_set(effect, pname, value) -> None:
     """Set an effect parameter: scalar float/int, or a float list."""
+    _require_symbol(b"alGetEffecti")
+    _require_symbol(b"alEffecti")
+    _require_symbol(b"alEffectf")
+    _require_symbol(b"alEffectfv")
     cdef ALuint e = <ALuint> effect
     cdef ALenum p = <ALenum> pname
     cdef ALfloat* buf = NULL
@@ -673,6 +688,7 @@ def effect_set(effect, pname, value) -> None:
 
 
 def gen_filters(n: int = 1) -> list:
+    _require_symbol(b"alGenFilters")
     cdef int64_t count = _count(n)
     cdef ALuint* arr = <ALuint*> _allocate(count, sizeof(ALuint))
     try:
@@ -684,6 +700,7 @@ def gen_filters(n: int = 1) -> list:
 
 
 def delete_filters(filters) -> None:
+    _require_symbol(b"alDeleteFilters")
     cdef int64_t n = len(filters)
     cdef int64_t i
     cdef ALuint* arr = <ALuint*> _allocate(n, sizeof(ALuint))
@@ -698,6 +715,9 @@ def delete_filters(filters) -> None:
 
 def filter_set(f, pname, value) -> None:
     """Set a filter parameter: scalar float/int, or a float list."""
+    _require_symbol(b"alFilteri")
+    _require_symbol(b"alFilterf")
+    _require_symbol(b"alFilterfv")
     cdef ALuint flt = <ALuint> f
     cdef ALenum p = <ALenum> pname
     cdef ALfloat* buf = NULL
@@ -722,6 +742,7 @@ def filter_set(f, pname, value) -> None:
 
 
 def gen_auxiliary_effect_slots(n: int = 1) -> list:
+    _require_symbol(b"alGenAuxiliaryEffectSlots")
     cdef int64_t count = _count(n)
     cdef ALuint* arr = <ALuint*> _allocate(count, sizeof(ALuint))
     try:
@@ -733,6 +754,7 @@ def gen_auxiliary_effect_slots(n: int = 1) -> list:
 
 
 def delete_auxiliary_effect_slots(slots) -> None:
+    _require_symbol(b"alDeleteAuxiliaryEffectSlots")
     cdef int64_t n = len(slots)
     cdef int64_t i
     cdef ALuint* arr = <ALuint*> _allocate(n, sizeof(ALuint))
@@ -747,6 +769,9 @@ def delete_auxiliary_effect_slots(slots) -> None:
 
 def auxiliary_effect_slot_set(slot, pname, value) -> None:
     """Set an auxiliary effect slot parameter: scalar float/int, or a float list."""
+    _require_symbol(b"alAuxiliaryEffectSloti")
+    _require_symbol(b"alAuxiliaryEffectSlotf")
+    _require_symbol(b"alAuxiliaryEffectSlotfv")
     cdef ALuint sl = <ALuint> slot
     cdef ALenum p = <ALenum> pname
     cdef ALfloat* buf = NULL

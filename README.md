@@ -3,8 +3,9 @@
 A modern Python binding for [OpenAL-soft](https://github.com/kcat/openal-soft)
 with a pythonic object model.
 
-`openal-py` ships a **platform wheel** with the OpenAL library bundled inside
-it: install with `pip install openal-py` and no system OpenAL is needed.
+`openal-py` ships a **platform wheel** with the OpenAL library bundled by default:
+install with `pip install openal-py` and no system OpenAL is normally needed.
+Builds can omit the bundle and use a system installation instead.
 
 ## Quick start
 
@@ -92,9 +93,10 @@ The file's channel count must match the format (no downmixing).
     function in `al.h` / `alc.h` with exact C types. No Python semantics.
   - `openal_py` — plain Python classes (`Device`, `Context`, `Buffer`,
     `Source`, `Listener`) that provide the pythonic API.
-- **Bundled library** — the shared library is installed next to the
-  extension and dlopen'd at import time. Override with the
-  `OPENAL_PY_LIBRARY` environment variable.
+- **Runtime library selection** — prefer the bundled shared library when it
+  detects playback devices, otherwise try system OpenAL. The extension has no
+  link-time dependency on OpenAL. Set `OPENAL_PY_LIBRARY` to explicitly select
+  an implementation.
 - **Generated bindings** — `_al_api.pxd`, `_api_table.c` and `_constants.py`
   are generated from `registry/xml/al.xml` (the same canonical source that
   generates the C headers) by `codegen/generate_api.py`. Regenerate with:
@@ -102,6 +104,43 @@ The file's channel count must match the format (no downmixing).
   ```sh
   python3 codegen/generate_api.py
   ```
+
+## Bundling and system OpenAL
+
+`bundle_openal` is a Meson boolean option, default **ON**. Disable it for a
+system-library-only installation or wheel:
+
+```sh
+pip install . -Csetup-args=-Dbundle_openal=false
+pip wheel . -Csetup-args=-Dbundle_openal=false
+# Or configure Meson directly:
+meson setup build -Dbundle_openal=false
+```
+
+With bundling OFF, only the vendored OpenAL headers are needed to build the
+binding; building the OpenAL shared library first is unnecessary. With bundling
+ON, `openal_libdir` supplies the shared library to install alongside the extension.
+
+At import, the binding tries:
+
+1. `OPENAL_PY_LIBRARY`, if set. This is authoritative; an invalid override raises
+   `ImportError` without silently selecting another implementation.
+2. The bundled library, if present and loadable, when playback-device enumeration
+   detects at least one device.
+3. System OpenAL, using platform discovery and conventional loader names
+   (`libopenal.so.1` on Linux, `OpenAL32.dll` on Windows, and OpenAL dylib/framework
+   locations on macOS).
+
+If system OpenAL is unavailable but the bundle loads without detecting playback
+devices, retain the bundle for headless/loopback use. If neither library loads,
+import raises `ImportError` with the attempted library names. No playback device
+is opened during import. Enumeration is the backend-detection signal; a listed
+device may still fail to open later, for example if permissions change.
+
+The chosen implementation stays fixed for the process so existing handles never
+cross between libraries. `openal_py.library_path()` identifies the selected path
+or loader name. Optional functions missing from a system implementation raise
+`NotImplementedError` when called.
 
 ## Development
 

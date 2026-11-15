@@ -20,9 +20,10 @@ def test_device_extensions_are_strings(device):
     exts = device.extensions
     assert isinstance(exts, list)
     assert all(isinstance(e, str) for e in exts)
-    # OpenAL-soft always advertises these ALC extensions
-    for ext in ("ALC_ENUMERATE_ALL_EXT", "ALC_EXT_debug", "ALC_EXT_EFX"):
-        assert ext in exts
+    # System implementations may expose fewer extensions than the bundle.
+    for ext in exts:
+        assert device.is_alc_extension_present(ext)
+    assert not device.is_alc_extension_present("ALC_NO_SUCH_EXTENSION")
 
 
 def test_device_attributes(device):

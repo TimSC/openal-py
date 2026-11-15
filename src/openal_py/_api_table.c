@@ -2,7 +2,11 @@
 #define _GNU_SOURCE   /* strdup, POSIX dlfcn */
 #include "_api_table.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -336,6 +340,7 @@ typedef struct {
 static ALPyTable fn;
 static int initialized = 0;
 static const char* g_libpath = NULL;
+static void* g_handle = NULL;
 
 static const char* const AL_PY_SYMBOLS[] = {
     "alEnable",
@@ -435,373 +440,419 @@ static const char* const AL_PY_SYMBOLS[] = {
 
 
 
-int openal_py_init(const char* libpath)
+
+static void* open_library(const char* path)
+{
+#ifdef _WIN32
+    wchar_t wide_path[32768];
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1,
+                            wide_path, 32768))
+        return NULL;
+    return (void*)LoadLibraryW(wide_path);
+#else
+    return dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#endif
+}
+
+static void close_library(void* handle)
+{
+#ifdef _WIN32
+    FreeLibrary((HMODULE)handle);
+#else
+    dlclose(handle);
+#endif
+}
+
+static void* lookup(void* handle, const char* name)
+{
+#ifdef _WIN32
+    return (void*)GetProcAddress((HMODULE)handle, name);
+#else
+    return dlsym(handle, name);
+#endif
+}
+
+int openal_py_init(const char* libpath, int require_devices)
 {
     void* handle;
+    ALPyTable candidate;
+    char* path_copy;
 
     if (initialized)
         return 1;
-
-    if (libpath != NULL && libpath[0] != '\0')
-    {
-        handle = dlopen(libpath, RTLD_NOW | RTLD_LOCAL);
-        if (handle == NULL)
-        {
-            fprintf(stderr, "openal_py: dlopen(\'%s\') failed: %s\n", libpath, dlerror());
-            return 0;
-        }
-        g_libpath = strdup(libpath);
-    }
-    else
-    {
-        /* Resolve against the bundled library the extension is linked with. */
-        handle = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
-        if (handle == NULL)
-        {
-            fprintf(stderr, "openal_py: dlopen(NULL) failed: %s\n", dlerror());
-            return 0;
-        }
-        g_libpath = strdup("(bundled)");
-    }
+    if (!libpath || !libpath[0])
+        return 0;
+    handle = open_library(libpath);
+    if (!handle)
+        return 0;
 
     for (size_t i = 0; i < sizeof(AL_PY_SYMBOLS) / sizeof(AL_PY_SYMBOLS[0]); ++i)
     {
-        void* sym = dlsym(handle, AL_PY_SYMBOLS[i]);
-        if (sym == NULL)
+        if (!lookup(handle, AL_PY_SYMBOLS[i]))
         {
-            fprintf(stderr, "openal_py: missing symbol: %s\n", AL_PY_SYMBOLS[i]);
-            dlclose(handle);
+            close_library(handle);
             return 0;
         }
     }
 
-    fn.alEnable = (void (*)(ALenum)) dlsym(handle, "alEnable");
-    fn.alDisable = (void (*)(ALenum)) dlsym(handle, "alDisable");
-    fn.alIsEnabled = (ALboolean (*)(ALenum)) dlsym(handle, "alIsEnabled");
-    fn.alDopplerFactor = (void (*)(ALfloat)) dlsym(handle, "alDopplerFactor");
-    fn.alDopplerVelocity = (void (*)(ALfloat)) dlsym(handle, "alDopplerVelocity");
-    fn.alSpeedOfSound = (void (*)(ALfloat)) dlsym(handle, "alSpeedOfSound");
-    fn.alDistanceModel = (void (*)(ALenum)) dlsym(handle, "alDistanceModel");
-    fn.alGetString = (const ALchar * (*)(ALenum)) dlsym(handle, "alGetString");
-    fn.alGetBooleanv = (void (*)(ALenum, ALboolean *)) dlsym(handle, "alGetBooleanv");
-    fn.alGetIntegerv = (void (*)(ALenum, ALint *)) dlsym(handle, "alGetIntegerv");
-    fn.alGetFloatv = (void (*)(ALenum, ALfloat *)) dlsym(handle, "alGetFloatv");
-    fn.alGetDoublev = (void (*)(ALenum, ALdouble *)) dlsym(handle, "alGetDoublev");
-    fn.alGetBoolean = (ALboolean (*)(ALenum)) dlsym(handle, "alGetBoolean");
-    fn.alGetInteger = (ALint (*)(ALenum)) dlsym(handle, "alGetInteger");
-    fn.alGetFloat = (ALfloat (*)(ALenum)) dlsym(handle, "alGetFloat");
-    fn.alGetDouble = (ALdouble (*)(ALenum)) dlsym(handle, "alGetDouble");
-    fn.alGetError = (ALenum (*)(void)) dlsym(handle, "alGetError");
-    fn.alIsExtensionPresent = (ALboolean (*)(const ALchar *)) dlsym(handle, "alIsExtensionPresent");
-    fn.alGetProcAddress = (void* (*)(const ALchar *)) dlsym(handle, "alGetProcAddress");
-    fn.alGetEnumValue = (ALenum (*)(const ALchar *)) dlsym(handle, "alGetEnumValue");
-    fn.alListenerf = (void (*)(ALenum, ALfloat)) dlsym(handle, "alListenerf");
-    fn.alListener3f = (void (*)(ALenum, ALfloat, ALfloat, ALfloat)) dlsym(handle, "alListener3f");
-    fn.alListenerfv = (void (*)(ALenum, const ALfloat *)) dlsym(handle, "alListenerfv");
-    fn.alListeneri = (void (*)(ALenum, ALint)) dlsym(handle, "alListeneri");
-    fn.alListener3i = (void (*)(ALenum, ALint, ALint, ALint)) dlsym(handle, "alListener3i");
-    fn.alListeneriv = (void (*)(ALenum, const ALint *)) dlsym(handle, "alListeneriv");
-    fn.alGetListenerf = (void (*)(ALenum, ALfloat *)) dlsym(handle, "alGetListenerf");
-    fn.alGetListener3f = (void (*)(ALenum, ALfloat *, ALfloat *, ALfloat *)) dlsym(handle, "alGetListener3f");
-    fn.alGetListenerfv = (void (*)(ALenum, ALfloat *)) dlsym(handle, "alGetListenerfv");
-    fn.alGetListeneri = (void (*)(ALenum, ALint *)) dlsym(handle, "alGetListeneri");
-    fn.alGetListener3i = (void (*)(ALenum, ALint *, ALint *, ALint *)) dlsym(handle, "alGetListener3i");
-    fn.alGetListeneriv = (void (*)(ALenum, ALint *)) dlsym(handle, "alGetListeneriv");
-    fn.alGenSources = (void (*)(ALsizei, ALuint *)) dlsym(handle, "alGenSources");
-    fn.alDeleteSources = (void (*)(ALsizei, const ALuint *)) dlsym(handle, "alDeleteSources");
-    fn.alIsSource = (ALboolean (*)(ALuint)) dlsym(handle, "alIsSource");
-    fn.alSourcef = (void (*)(ALuint, ALenum, ALfloat)) dlsym(handle, "alSourcef");
-    fn.alSource3f = (void (*)(ALuint, ALenum, ALfloat, ALfloat, ALfloat)) dlsym(handle, "alSource3f");
-    fn.alSourcefv = (void (*)(ALuint, ALenum, const ALfloat *)) dlsym(handle, "alSourcefv");
-    fn.alSourcei = (void (*)(ALuint, ALenum, ALint)) dlsym(handle, "alSourcei");
-    fn.alSource3i = (void (*)(ALuint, ALenum, ALint, ALint, ALint)) dlsym(handle, "alSource3i");
-    fn.alSourceiv = (void (*)(ALuint, ALenum, const ALint *)) dlsym(handle, "alSourceiv");
-    fn.alGetSourcef = (void (*)(ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetSourcef");
-    fn.alGetSourcefv = (void (*)(ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetSourcefv");
-    fn.alGetSourcei = (void (*)(ALuint, ALenum, ALint *)) dlsym(handle, "alGetSourcei");
-    fn.alGetSourceiv = (void (*)(ALuint, ALenum, ALint *)) dlsym(handle, "alGetSourceiv");
-    fn.alGetSource3i = (void (*)(ALuint, ALenum, ALint *, ALint *, ALint *)) dlsym(handle, "alGetSource3i");
-    fn.alGetSource3f = (void (*)(ALuint, ALenum, ALfloat *, ALfloat *, ALfloat *)) dlsym(handle, "alGetSource3f");
-    fn.alSourcePlay = (void (*)(ALuint)) dlsym(handle, "alSourcePlay");
-    fn.alSourceStop = (void (*)(ALuint)) dlsym(handle, "alSourceStop");
-    fn.alSourceRewind = (void (*)(ALuint)) dlsym(handle, "alSourceRewind");
-    fn.alSourcePause = (void (*)(ALuint)) dlsym(handle, "alSourcePause");
-    fn.alSourcePlayv = (void (*)(ALsizei, const ALuint *)) dlsym(handle, "alSourcePlayv");
-    fn.alSourceStopv = (void (*)(ALsizei, const ALuint *)) dlsym(handle, "alSourceStopv");
-    fn.alSourceRewindv = (void (*)(ALsizei, const ALuint *)) dlsym(handle, "alSourceRewindv");
-    fn.alSourcePausev = (void (*)(ALsizei, const ALuint *)) dlsym(handle, "alSourcePausev");
-    fn.alSourceQueueBuffers = (void (*)(ALuint, ALsizei, const ALuint *)) dlsym(handle, "alSourceQueueBuffers");
-    fn.alSourceUnqueueBuffers = (void (*)(ALuint, ALsizei, ALuint *)) dlsym(handle, "alSourceUnqueueBuffers");
-    fn.alGenBuffers = (void (*)(ALsizei, ALuint *)) dlsym(handle, "alGenBuffers");
-    fn.alDeleteBuffers = (void (*)(ALsizei, const ALuint *)) dlsym(handle, "alDeleteBuffers");
-    fn.alIsBuffer = (ALboolean (*)(ALuint)) dlsym(handle, "alIsBuffer");
-    fn.alBufferData = (void (*)(ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) dlsym(handle, "alBufferData");
-    fn.alBufferf = (void (*)(ALuint, ALenum, ALfloat)) dlsym(handle, "alBufferf");
-    fn.alBuffer3f = (void (*)(ALuint, ALenum, ALfloat, ALfloat, ALfloat)) dlsym(handle, "alBuffer3f");
-    fn.alBufferfv = (void (*)(ALuint, ALenum, const ALfloat *)) dlsym(handle, "alBufferfv");
-    fn.alBufferi = (void (*)(ALuint, ALenum, ALint)) dlsym(handle, "alBufferi");
-    fn.alBuffer3i = (void (*)(ALuint, ALenum, ALint, ALint, ALint)) dlsym(handle, "alBuffer3i");
-    fn.alBufferiv = (void (*)(ALuint, ALenum, const ALint *)) dlsym(handle, "alBufferiv");
-    fn.alGetBufferf = (void (*)(ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetBufferf");
-    fn.alGetBufferfv = (void (*)(ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetBufferfv");
-    fn.alGetBufferi = (void (*)(ALuint, ALenum, ALint *)) dlsym(handle, "alGetBufferi");
-    fn.alGetBufferiv = (void (*)(ALuint, ALenum, ALint *)) dlsym(handle, "alGetBufferiv");
-    fn.alGetBuffer3i = (void (*)(ALuint, ALenum, ALint *, ALint *, ALint *)) dlsym(handle, "alGetBuffer3i");
-    fn.alGetBuffer3f = (void (*)(ALuint, ALenum, ALfloat *, ALfloat *, ALfloat *)) dlsym(handle, "alGetBuffer3f");
-    fn.alBufferDataStatic = (void (*)(ALuint, ALenum, ALvoid *, ALsizei, ALsizei)) dlsym(handle, "alBufferDataStatic");
-    fn.alGenEffects = (void (*)(ALsizei, ALuint *)) dlsym(handle, "alGenEffects");
-    fn.alDeleteEffects = (void (*)(ALsizei, const ALuint *)) dlsym(handle, "alDeleteEffects");
-    fn.alIsEffect = (ALboolean (*)(ALuint)) dlsym(handle, "alIsEffect");
-    fn.alEffecti = (void (*)(ALuint, ALenum, ALint)) dlsym(handle, "alEffecti");
-    fn.alEffectiv = (void (*)(ALuint, ALenum, const ALint *)) dlsym(handle, "alEffectiv");
-    fn.alEffectf = (void (*)(ALuint, ALenum, ALfloat)) dlsym(handle, "alEffectf");
-    fn.alEffectfv = (void (*)(ALuint, ALenum, const ALfloat *)) dlsym(handle, "alEffectfv");
-    fn.alGetEffecti = (void (*)(ALuint, ALenum, ALint *)) dlsym(handle, "alGetEffecti");
-    fn.alGetEffectiv = (void (*)(ALuint, ALenum, ALint *)) dlsym(handle, "alGetEffectiv");
-    fn.alGetEffectf = (void (*)(ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetEffectf");
-    fn.alGetEffectfv = (void (*)(ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetEffectfv");
-    fn.alGenFilters = (void (*)(ALsizei, ALuint *)) dlsym(handle, "alGenFilters");
-    fn.alDeleteFilters = (void (*)(ALsizei, const ALuint *)) dlsym(handle, "alDeleteFilters");
-    fn.alIsFilter = (ALboolean (*)(ALuint)) dlsym(handle, "alIsFilter");
-    fn.alFilteri = (void (*)(ALuint, ALenum, ALint)) dlsym(handle, "alFilteri");
-    fn.alFilteriv = (void (*)(ALuint, ALenum, const ALint *)) dlsym(handle, "alFilteriv");
-    fn.alFilterf = (void (*)(ALuint, ALenum, ALfloat)) dlsym(handle, "alFilterf");
-    fn.alFilterfv = (void (*)(ALuint, ALenum, const ALfloat *)) dlsym(handle, "alFilterfv");
-    fn.alGetFilteri = (void (*)(ALuint, ALenum, ALint *)) dlsym(handle, "alGetFilteri");
-    fn.alGetFilteriv = (void (*)(ALuint, ALenum, ALint *)) dlsym(handle, "alGetFilteriv");
-    fn.alGetFilterf = (void (*)(ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetFilterf");
-    fn.alGetFilterfv = (void (*)(ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetFilterfv");
-    fn.alGenAuxiliaryEffectSlots = (void (*)(ALsizei, ALuint *)) dlsym(handle, "alGenAuxiliaryEffectSlots");
-    fn.alDeleteAuxiliaryEffectSlots = (void (*)(ALsizei, const ALuint *)) dlsym(handle, "alDeleteAuxiliaryEffectSlots");
-    fn.alIsAuxiliaryEffectSlot = (ALboolean (*)(ALuint)) dlsym(handle, "alIsAuxiliaryEffectSlot");
-    fn.alAuxiliaryEffectSloti = (void (*)(ALuint, ALenum, ALint)) dlsym(handle, "alAuxiliaryEffectSloti");
-    fn.alAuxiliaryEffectSlotiv = (void (*)(ALuint, ALenum, const ALint *)) dlsym(handle, "alAuxiliaryEffectSlotiv");
-    fn.alAuxiliaryEffectSlotf = (void (*)(ALuint, ALenum, ALfloat)) dlsym(handle, "alAuxiliaryEffectSlotf");
-    fn.alAuxiliaryEffectSlotfv = (void (*)(ALuint, ALenum, const ALfloat *)) dlsym(handle, "alAuxiliaryEffectSlotfv");
-    fn.alGetAuxiliaryEffectSloti = (void (*)(ALuint, ALenum, ALint *)) dlsym(handle, "alGetAuxiliaryEffectSloti");
-    fn.alGetAuxiliaryEffectSlotiv = (void (*)(ALuint, ALenum, ALint *)) dlsym(handle, "alGetAuxiliaryEffectSlotiv");
-    fn.alGetAuxiliaryEffectSlotf = (void (*)(ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetAuxiliaryEffectSlotf");
-    fn.alGetAuxiliaryEffectSlotfv = (void (*)(ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetAuxiliaryEffectSlotfv");
-    fn.alBufferSubDataSOFT = (void (*)(ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) dlsym(handle, "alBufferSubDataSOFT");
-    fn.alRequestFoldbackStop = (void (*)(void)) dlsym(handle, "alRequestFoldbackStop");
-    fn.alBufferSamplesSOFT = (void (*)(ALuint, ALuint, ALenum, ALsizei, ALenum, ALenum, const ALvoid *)) dlsym(handle, "alBufferSamplesSOFT");
-    fn.alBufferSubSamplesSOFT = (void (*)(ALuint, ALsizei, ALsizei, ALenum, ALenum, const ALvoid *)) dlsym(handle, "alBufferSubSamplesSOFT");
-    fn.alGetBufferSamplesSOFT = (void (*)(ALuint, ALsizei, ALsizei, ALenum, ALenum, ALvoid *)) dlsym(handle, "alGetBufferSamplesSOFT");
-    fn.alIsBufferFormatSupportedSOFT = (ALboolean (*)(ALenum)) dlsym(handle, "alIsBufferFormatSupportedSOFT");
-    fn.alSourcedSOFT = (void (*)(ALuint, ALenum, ALdouble)) dlsym(handle, "alSourcedSOFT");
-    fn.alSource3dSOFT = (void (*)(ALuint, ALenum, ALdouble, ALdouble, ALdouble)) dlsym(handle, "alSource3dSOFT");
-    fn.alSourcedvSOFT = (void (*)(ALuint, ALenum, const ALdouble *)) dlsym(handle, "alSourcedvSOFT");
-    fn.alGetSourcedSOFT = (void (*)(ALuint, ALenum, ALdouble *)) dlsym(handle, "alGetSourcedSOFT");
-    fn.alGetSource3dSOFT = (void (*)(ALuint, ALenum, ALdouble *, ALdouble *, ALdouble *)) dlsym(handle, "alGetSource3dSOFT");
-    fn.alGetSourcedvSOFT = (void (*)(ALuint, ALenum, ALdouble *)) dlsym(handle, "alGetSourcedvSOFT");
-    fn.alSourcei64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT)) dlsym(handle, "alSourcei64SOFT");
-    fn.alSource3i64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT, ALint64SOFT, ALint64SOFT)) dlsym(handle, "alSource3i64SOFT");
-    fn.alSourcei64vSOFT = (void (*)(ALuint, ALenum, const ALint64SOFT *)) dlsym(handle, "alSourcei64vSOFT");
-    fn.alGetSourcei64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT *)) dlsym(handle, "alGetSourcei64SOFT");
-    fn.alGetSource3i64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT *, ALint64SOFT *, ALint64SOFT *)) dlsym(handle, "alGetSource3i64SOFT");
-    fn.alGetSourcei64vSOFT = (void (*)(ALuint, ALenum, ALint64SOFT *)) dlsym(handle, "alGetSourcei64vSOFT");
-    fn.alDeferUpdatesSOFT = (void (*)(void)) dlsym(handle, "alDeferUpdatesSOFT");
-    fn.alProcessUpdatesSOFT = (void (*)(void)) dlsym(handle, "alProcessUpdatesSOFT");
-    fn.alGetStringiSOFT = (const ALchar * (*)(ALenum, ALsizei)) dlsym(handle, "alGetStringiSOFT");
-    fn.alEventControlSOFT = (void (*)(ALsizei, const ALenum *, ALboolean)) dlsym(handle, "alEventControlSOFT");
-    fn.alGetPointerSOFT = (void* (*)(ALenum)) dlsym(handle, "alGetPointerSOFT");
-    fn.alGetPointervSOFT = (void (*)(ALenum, void **)) dlsym(handle, "alGetPointervSOFT");
-    fn.alGetBufferPtrSOFT = (void (*)(ALuint, ALenum, ALvoid **)) dlsym(handle, "alGetBufferPtrSOFT");
-    fn.alGetBuffer3PtrSOFT = (void (*)(ALuint, ALenum, ALvoid **, ALvoid **, ALvoid **)) dlsym(handle, "alGetBuffer3PtrSOFT");
-    fn.alGetBufferPtrvSOFT = (void (*)(ALuint, ALenum, ALvoid **)) dlsym(handle, "alGetBufferPtrvSOFT");
-    fn.alSourcePlayAtTimeSOFT = (void (*)(ALuint, ALint64SOFT)) dlsym(handle, "alSourcePlayAtTimeSOFT");
-    fn.alSourcePlayAtTimevSOFT = (void (*)(ALsizei, const ALuint *, ALint64SOFT)) dlsym(handle, "alSourcePlayAtTimevSOFT");
-    fn.alDebugMessageInsertEXT = (void (*)(ALenum, ALenum, ALuint, ALenum, ALsizei, const ALchar *)) dlsym(handle, "alDebugMessageInsertEXT");
-    fn.alDebugMessageControlEXT = (void (*)(ALenum, ALenum, ALenum, ALsizei, const ALuint *, ALboolean)) dlsym(handle, "alDebugMessageControlEXT");
-    fn.alPushDebugGroupEXT = (void (*)(ALenum, ALuint, ALsizei, const ALchar *)) dlsym(handle, "alPushDebugGroupEXT");
-    fn.alPopDebugGroupEXT = (void (*)(void)) dlsym(handle, "alPopDebugGroupEXT");
-    fn.alGetDebugMessageLogEXT = (ALuint (*)(ALuint, ALsizei, ALenum *, ALenum *, ALuint *, ALenum *, ALsizei *, ALchar *)) dlsym(handle, "alGetDebugMessageLogEXT");
-    fn.alObjectLabelEXT = (void (*)(ALenum, ALuint, ALsizei, const ALchar *)) dlsym(handle, "alObjectLabelEXT");
-    fn.alGetObjectLabelEXT = (void (*)(ALenum, ALuint, ALsizei, ALsizei *, ALchar *)) dlsym(handle, "alGetObjectLabelEXT");
-    fn.alGetPointerEXT = (void* (*)(ALenum)) dlsym(handle, "alGetPointerEXT");
-    fn.alGetPointervEXT = (void (*)(ALenum, void **)) dlsym(handle, "alGetPointervEXT");
-    fn.alEnableDirect = (void (*)(ALCcontext *, ALenum)) dlsym(handle, "alEnableDirect");
-    fn.alDisableDirect = (void (*)(ALCcontext *, ALenum)) dlsym(handle, "alDisableDirect");
-    fn.alIsEnabledDirect = (ALboolean (*)(ALCcontext *, ALenum)) dlsym(handle, "alIsEnabledDirect");
-    fn.alDopplerFactorDirect = (void (*)(ALCcontext *, ALfloat)) dlsym(handle, "alDopplerFactorDirect");
-    fn.alSpeedOfSoundDirect = (void (*)(ALCcontext *, ALfloat)) dlsym(handle, "alSpeedOfSoundDirect");
-    fn.alDistanceModelDirect = (void (*)(ALCcontext *, ALenum)) dlsym(handle, "alDistanceModelDirect");
-    fn.alGetStringDirect = (const ALchar * (*)(ALCcontext *, ALenum)) dlsym(handle, "alGetStringDirect");
-    fn.alGetBooleanvDirect = (void (*)(ALCcontext *, ALenum, ALboolean *)) dlsym(handle, "alGetBooleanvDirect");
-    fn.alGetIntegervDirect = (void (*)(ALCcontext *, ALenum, ALint *)) dlsym(handle, "alGetIntegervDirect");
-    fn.alGetFloatvDirect = (void (*)(ALCcontext *, ALenum, ALfloat *)) dlsym(handle, "alGetFloatvDirect");
-    fn.alGetDoublevDirect = (void (*)(ALCcontext *, ALenum, ALdouble *)) dlsym(handle, "alGetDoublevDirect");
-    fn.alGetBooleanDirect = (ALboolean (*)(ALCcontext *, ALenum)) dlsym(handle, "alGetBooleanDirect");
-    fn.alGetIntegerDirect = (ALint (*)(ALCcontext *, ALenum)) dlsym(handle, "alGetIntegerDirect");
-    fn.alGetFloatDirect = (ALfloat (*)(ALCcontext *, ALenum)) dlsym(handle, "alGetFloatDirect");
-    fn.alGetDoubleDirect = (ALdouble (*)(ALCcontext *, ALenum)) dlsym(handle, "alGetDoubleDirect");
-    fn.alGetErrorDirect = (ALenum (*)(ALCcontext *)) dlsym(handle, "alGetErrorDirect");
-    fn.alIsExtensionPresentDirect = (ALboolean (*)(ALCcontext *, const ALchar *)) dlsym(handle, "alIsExtensionPresentDirect");
-    fn.alGetProcAddressDirect = (void* (*)(ALCcontext *, const ALchar *)) dlsym(handle, "alGetProcAddressDirect");
-    fn.alGetEnumValueDirect = (ALenum (*)(ALCcontext *, const ALchar *)) dlsym(handle, "alGetEnumValueDirect");
-    fn.alListenerfDirect = (void (*)(ALCcontext *, ALenum, ALfloat)) dlsym(handle, "alListenerfDirect");
-    fn.alListener3fDirect = (void (*)(ALCcontext *, ALenum, ALfloat, ALfloat, ALfloat)) dlsym(handle, "alListener3fDirect");
-    fn.alListenerfvDirect = (void (*)(ALCcontext *, ALenum, const ALfloat *)) dlsym(handle, "alListenerfvDirect");
-    fn.alListeneriDirect = (void (*)(ALCcontext *, ALenum, ALint)) dlsym(handle, "alListeneriDirect");
-    fn.alListener3iDirect = (void (*)(ALCcontext *, ALenum, ALint, ALint, ALint)) dlsym(handle, "alListener3iDirect");
-    fn.alListenerivDirect = (void (*)(ALCcontext *, ALenum, const ALint *)) dlsym(handle, "alListenerivDirect");
-    fn.alGetListenerfDirect = (void (*)(ALCcontext *, ALenum, ALfloat *)) dlsym(handle, "alGetListenerfDirect");
-    fn.alGetListener3fDirect = (void (*)(ALCcontext *, ALenum, ALfloat *, ALfloat *, ALfloat *)) dlsym(handle, "alGetListener3fDirect");
-    fn.alGetListenerfvDirect = (void (*)(ALCcontext *, ALenum, ALfloat *)) dlsym(handle, "alGetListenerfvDirect");
-    fn.alGetListeneriDirect = (void (*)(ALCcontext *, ALenum, ALint *)) dlsym(handle, "alGetListeneriDirect");
-    fn.alGetListener3iDirect = (void (*)(ALCcontext *, ALenum, ALint *, ALint *, ALint *)) dlsym(handle, "alGetListener3iDirect");
-    fn.alGetListenerivDirect = (void (*)(ALCcontext *, ALenum, ALint *)) dlsym(handle, "alGetListenerivDirect");
-    fn.alGenSourcesDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) dlsym(handle, "alGenSourcesDirect");
-    fn.alDeleteSourcesDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) dlsym(handle, "alDeleteSourcesDirect");
-    fn.alIsSourceDirect = (ALboolean (*)(ALCcontext *, ALuint)) dlsym(handle, "alIsSourceDirect");
-    fn.alSourcefDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) dlsym(handle, "alSourcefDirect");
-    fn.alSource3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat, ALfloat, ALfloat)) dlsym(handle, "alSource3fDirect");
-    fn.alSourcefvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) dlsym(handle, "alSourcefvDirect");
-    fn.alSourceiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) dlsym(handle, "alSourceiDirect");
-    fn.alSource3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint, ALint, ALint)) dlsym(handle, "alSource3iDirect");
-    fn.alSourceivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) dlsym(handle, "alSourceivDirect");
-    fn.alGetSourcefDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetSourcefDirect");
-    fn.alGetSource3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *, ALfloat *, ALfloat *)) dlsym(handle, "alGetSource3fDirect");
-    fn.alGetSourcefvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetSourcefvDirect");
-    fn.alGetSourceiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) dlsym(handle, "alGetSourceiDirect");
-    fn.alGetSource3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *, ALint *, ALint *)) dlsym(handle, "alGetSource3iDirect");
-    fn.alGetSourceivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) dlsym(handle, "alGetSourceivDirect");
-    fn.alSourcePlayDirect = (void (*)(ALCcontext *, ALuint)) dlsym(handle, "alSourcePlayDirect");
-    fn.alSourceStopDirect = (void (*)(ALCcontext *, ALuint)) dlsym(handle, "alSourceStopDirect");
-    fn.alSourceRewindDirect = (void (*)(ALCcontext *, ALuint)) dlsym(handle, "alSourceRewindDirect");
-    fn.alSourcePauseDirect = (void (*)(ALCcontext *, ALuint)) dlsym(handle, "alSourcePauseDirect");
-    fn.alSourcePlayvDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) dlsym(handle, "alSourcePlayvDirect");
-    fn.alSourceStopvDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) dlsym(handle, "alSourceStopvDirect");
-    fn.alSourceRewindvDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) dlsym(handle, "alSourceRewindvDirect");
-    fn.alSourcePausevDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) dlsym(handle, "alSourcePausevDirect");
-    fn.alSourceQueueBuffersDirect = (void (*)(ALCcontext *, ALuint, ALsizei, const ALuint *)) dlsym(handle, "alSourceQueueBuffersDirect");
-    fn.alSourceUnqueueBuffersDirect = (void (*)(ALCcontext *, ALuint, ALsizei, ALuint *)) dlsym(handle, "alSourceUnqueueBuffersDirect");
-    fn.alGenBuffersDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) dlsym(handle, "alGenBuffersDirect");
-    fn.alDeleteBuffersDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) dlsym(handle, "alDeleteBuffersDirect");
-    fn.alIsBufferDirect = (ALboolean (*)(ALCcontext *, ALuint)) dlsym(handle, "alIsBufferDirect");
-    fn.alBufferDataDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) dlsym(handle, "alBufferDataDirect");
-    fn.alBufferfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) dlsym(handle, "alBufferfDirect");
-    fn.alBuffer3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat, ALfloat, ALfloat)) dlsym(handle, "alBuffer3fDirect");
-    fn.alBufferfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) dlsym(handle, "alBufferfvDirect");
-    fn.alBufferiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) dlsym(handle, "alBufferiDirect");
-    fn.alBuffer3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint, ALint, ALint)) dlsym(handle, "alBuffer3iDirect");
-    fn.alBufferivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) dlsym(handle, "alBufferivDirect");
-    fn.alGetBufferfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetBufferfDirect");
-    fn.alGetBuffer3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *, ALfloat *, ALfloat *)) dlsym(handle, "alGetBuffer3fDirect");
-    fn.alGetBufferfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetBufferfvDirect");
-    fn.alGetBufferiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) dlsym(handle, "alGetBufferiDirect");
-    fn.alGetBuffer3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *, ALint *, ALint *)) dlsym(handle, "alGetBuffer3iDirect");
-    fn.alGetBufferivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) dlsym(handle, "alGetBufferivDirect");
-    fn.alGenEffectsDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) dlsym(handle, "alGenEffectsDirect");
-    fn.alDeleteEffectsDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) dlsym(handle, "alDeleteEffectsDirect");
-    fn.alIsEffectDirect = (ALboolean (*)(ALCcontext *, ALuint)) dlsym(handle, "alIsEffectDirect");
-    fn.alEffectiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) dlsym(handle, "alEffectiDirect");
-    fn.alEffectivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) dlsym(handle, "alEffectivDirect");
-    fn.alEffectfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) dlsym(handle, "alEffectfDirect");
-    fn.alEffectfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) dlsym(handle, "alEffectfvDirect");
-    fn.alGetEffectiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) dlsym(handle, "alGetEffectiDirect");
-    fn.alGetEffectivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) dlsym(handle, "alGetEffectivDirect");
-    fn.alGetEffectfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetEffectfDirect");
-    fn.alGetEffectfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetEffectfvDirect");
-    fn.alGenFiltersDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) dlsym(handle, "alGenFiltersDirect");
-    fn.alDeleteFiltersDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) dlsym(handle, "alDeleteFiltersDirect");
-    fn.alIsFilterDirect = (ALboolean (*)(ALCcontext *, ALuint)) dlsym(handle, "alIsFilterDirect");
-    fn.alFilteriDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) dlsym(handle, "alFilteriDirect");
-    fn.alFilterivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) dlsym(handle, "alFilterivDirect");
-    fn.alFilterfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) dlsym(handle, "alFilterfDirect");
-    fn.alFilterfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) dlsym(handle, "alFilterfvDirect");
-    fn.alGetFilteriDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) dlsym(handle, "alGetFilteriDirect");
-    fn.alGetFilterivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) dlsym(handle, "alGetFilterivDirect");
-    fn.alGetFilterfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetFilterfDirect");
-    fn.alGetFilterfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetFilterfvDirect");
-    fn.alGenAuxiliaryEffectSlotsDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) dlsym(handle, "alGenAuxiliaryEffectSlotsDirect");
-    fn.alDeleteAuxiliaryEffectSlotsDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) dlsym(handle, "alDeleteAuxiliaryEffectSlotsDirect");
-    fn.alIsAuxiliaryEffectSlotDirect = (ALboolean (*)(ALCcontext *, ALuint)) dlsym(handle, "alIsAuxiliaryEffectSlotDirect");
-    fn.alAuxiliaryEffectSlotiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) dlsym(handle, "alAuxiliaryEffectSlotiDirect");
-    fn.alAuxiliaryEffectSlotivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) dlsym(handle, "alAuxiliaryEffectSlotivDirect");
-    fn.alAuxiliaryEffectSlotfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) dlsym(handle, "alAuxiliaryEffectSlotfDirect");
-    fn.alAuxiliaryEffectSlotfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) dlsym(handle, "alAuxiliaryEffectSlotfvDirect");
-    fn.alGetAuxiliaryEffectSlotiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) dlsym(handle, "alGetAuxiliaryEffectSlotiDirect");
-    fn.alGetAuxiliaryEffectSlotivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) dlsym(handle, "alGetAuxiliaryEffectSlotivDirect");
-    fn.alGetAuxiliaryEffectSlotfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetAuxiliaryEffectSlotfDirect");
-    fn.alGetAuxiliaryEffectSlotfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) dlsym(handle, "alGetAuxiliaryEffectSlotfvDirect");
-    fn.alBufferDataStaticDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid *, ALsizei, ALsizei)) dlsym(handle, "alBufferDataStaticDirect");
-    fn.alDebugMessageInsertDirectEXT = (void (*)(ALCcontext *, ALenum, ALenum, ALuint, ALenum, ALsizei, const ALchar *)) dlsym(handle, "alDebugMessageInsertDirectEXT");
-    fn.alDebugMessageControlDirectEXT = (void (*)(ALCcontext *, ALenum, ALenum, ALenum, ALsizei, const ALuint *, ALboolean)) dlsym(handle, "alDebugMessageControlDirectEXT");
-    fn.alPushDebugGroupDirectEXT = (void (*)(ALCcontext *, ALenum, ALuint, ALsizei, const ALchar *)) dlsym(handle, "alPushDebugGroupDirectEXT");
-    fn.alPopDebugGroupDirectEXT = (void (*)(ALCcontext *)) dlsym(handle, "alPopDebugGroupDirectEXT");
-    fn.alGetDebugMessageLogDirectEXT = (ALuint (*)(ALCcontext *, ALuint, ALsizei, ALenum *, ALenum *, ALuint *, ALenum *, ALsizei *, ALchar *)) dlsym(handle, "alGetDebugMessageLogDirectEXT");
-    fn.alObjectLabelDirectEXT = (void (*)(ALCcontext *, ALenum, ALuint, ALsizei, const ALchar *)) dlsym(handle, "alObjectLabelDirectEXT");
-    fn.alGetObjectLabelDirectEXT = (void (*)(ALCcontext *, ALenum, ALuint, ALsizei, ALsizei *, ALchar *)) dlsym(handle, "alGetObjectLabelDirectEXT");
-    fn.alGetPointerDirectEXT = (void* (*)(ALCcontext *, ALenum)) dlsym(handle, "alGetPointerDirectEXT");
-    fn.alGetPointervDirectEXT = (void (*)(ALCcontext *, ALenum, void **)) dlsym(handle, "alGetPointervDirectEXT");
-    fn.alRequestFoldbackStopDirect = (void (*)(ALCcontext *)) dlsym(handle, "alRequestFoldbackStopDirect");
-    fn.alBufferSubDataDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) dlsym(handle, "alBufferSubDataDirectSOFT");
-    fn.alSourcedDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble)) dlsym(handle, "alSourcedDirectSOFT");
-    fn.alSource3dDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble, ALdouble, ALdouble)) dlsym(handle, "alSource3dDirectSOFT");
-    fn.alSourcedvDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, const ALdouble *)) dlsym(handle, "alSourcedvDirectSOFT");
-    fn.alGetSourcedDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble *)) dlsym(handle, "alGetSourcedDirectSOFT");
-    fn.alGetSource3dDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble *, ALdouble *, ALdouble *)) dlsym(handle, "alGetSource3dDirectSOFT");
-    fn.alGetSourcedvDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble *)) dlsym(handle, "alGetSourcedvDirectSOFT");
-    fn.alSourcei64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT)) dlsym(handle, "alSourcei64DirectSOFT");
-    fn.alSource3i64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT, ALint64SOFT, ALint64SOFT)) dlsym(handle, "alSource3i64DirectSOFT");
-    fn.alSourcei64vDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, const ALint64SOFT *)) dlsym(handle, "alSourcei64vDirectSOFT");
-    fn.alGetSourcei64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT *)) dlsym(handle, "alGetSourcei64DirectSOFT");
-    fn.alGetSource3i64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT *, ALint64SOFT *, ALint64SOFT *)) dlsym(handle, "alGetSource3i64DirectSOFT");
-    fn.alGetSourcei64vDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT *)) dlsym(handle, "alGetSourcei64vDirectSOFT");
-    fn.alDeferUpdatesDirectSOFT = (void (*)(ALCcontext *)) dlsym(handle, "alDeferUpdatesDirectSOFT");
-    fn.alProcessUpdatesDirectSOFT = (void (*)(ALCcontext *)) dlsym(handle, "alProcessUpdatesDirectSOFT");
-    fn.alGetStringiDirectSOFT = (const ALchar * (*)(ALCcontext *, ALenum, ALsizei)) dlsym(handle, "alGetStringiDirectSOFT");
-    fn.alEventControlDirectSOFT = (void (*)(ALCcontext *, ALsizei, const ALenum *, ALboolean)) dlsym(handle, "alEventControlDirectSOFT");
-    fn.alGetPointerDirectSOFT = (void* (*)(ALCcontext *, ALenum)) dlsym(handle, "alGetPointerDirectSOFT");
-    fn.alGetPointervDirectSOFT = (void (*)(ALCcontext *, ALenum, void **)) dlsym(handle, "alGetPointervDirectSOFT");
-    fn.alGetBufferPtrDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid **)) dlsym(handle, "alGetBufferPtrDirectSOFT");
-    fn.alGetBuffer3PtrDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid **, ALvoid **, ALvoid **)) dlsym(handle, "alGetBuffer3PtrDirectSOFT");
-    fn.alGetBufferPtrvDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid **)) dlsym(handle, "alGetBufferPtrvDirectSOFT");
-    fn.alSourcePlayAtTimeDirectSOFT = (void (*)(ALCcontext *, ALuint, ALint64SOFT)) dlsym(handle, "alSourcePlayAtTimeDirectSOFT");
-    fn.alSourcePlayAtTimevDirectSOFT = (void (*)(ALCcontext *, ALsizei, const ALuint *, ALint64SOFT)) dlsym(handle, "alSourcePlayAtTimevDirectSOFT");
-    fn.EAXSetDirect = (ALenum (*)(ALCcontext *, const struct _GUID *, ALuint, ALuint, ALvoid *, ALuint)) dlsym(handle, "EAXSetDirect");
-    fn.EAXGetDirect = (ALenum (*)(ALCcontext *, const struct _GUID *, ALuint, ALuint, ALvoid *, ALuint)) dlsym(handle, "EAXGetDirect");
-    fn.EAXSetBufferModeDirect = (ALboolean (*)(ALCcontext *, ALsizei, const ALuint *, ALint)) dlsym(handle, "EAXSetBufferModeDirect");
-    fn.EAXGetBufferModeDirect = (ALenum (*)(ALCcontext *, ALuint, ALint *)) dlsym(handle, "EAXGetBufferModeDirect");
-    fn.alcCreateContext = (ALCcontext * (*)(ALCdevice *, const ALCint *)) dlsym(handle, "alcCreateContext");
-    fn.alcMakeContextCurrent = (ALCboolean (*)(ALCcontext *)) dlsym(handle, "alcMakeContextCurrent");
-    fn.alcProcessContext = (void (*)(ALCcontext *)) dlsym(handle, "alcProcessContext");
-    fn.alcSuspendContext = (void (*)(ALCcontext *)) dlsym(handle, "alcSuspendContext");
-    fn.alcDestroyContext = (void (*)(ALCcontext *)) dlsym(handle, "alcDestroyContext");
-    fn.alcGetCurrentContext = (ALCcontext * (*)(void)) dlsym(handle, "alcGetCurrentContext");
-    fn.alcGetContextsDevice = (ALCdevice * (*)(ALCcontext *)) dlsym(handle, "alcGetContextsDevice");
-    fn.alcOpenDevice = (ALCdevice * (*)(const ALCchar *)) dlsym(handle, "alcOpenDevice");
-    fn.alcCloseDevice = (ALCboolean (*)(ALCdevice *)) dlsym(handle, "alcCloseDevice");
-    fn.alcGetError = (ALCenum (*)(ALCdevice *)) dlsym(handle, "alcGetError");
-    fn.alcIsExtensionPresent = (ALCboolean (*)(ALCdevice *, const ALCchar *)) dlsym(handle, "alcIsExtensionPresent");
-    fn.alcGetProcAddress = (ALCvoid * (*)(ALCdevice *, const ALCchar *)) dlsym(handle, "alcGetProcAddress");
-    fn.alcGetEnumValue = (ALCenum (*)(ALCdevice *, const ALCchar *)) dlsym(handle, "alcGetEnumValue");
-    fn.alcGetString = (const ALCchar * (*)(ALCdevice *, ALCenum)) dlsym(handle, "alcGetString");
-    fn.alcGetIntegerv = (void (*)(ALCdevice *, ALCenum, ALCsizei, ALCint *)) dlsym(handle, "alcGetIntegerv");
-    fn.alcCaptureOpenDevice = (ALCdevice * (*)(const ALCchar *, ALCuint, ALCenum, ALCsizei)) dlsym(handle, "alcCaptureOpenDevice");
-    fn.alcCaptureCloseDevice = (ALCboolean (*)(ALCdevice *)) dlsym(handle, "alcCaptureCloseDevice");
-    fn.alcCaptureStart = (void (*)(ALCdevice *)) dlsym(handle, "alcCaptureStart");
-    fn.alcCaptureStop = (void (*)(ALCdevice *)) dlsym(handle, "alcCaptureStop");
-    fn.alcCaptureSamples = (void (*)(ALCdevice *, ALCvoid *, ALCsizei)) dlsym(handle, "alcCaptureSamples");
-    fn.alcLoopbackOpenDeviceSOFT = (ALCdevice * (*)(const ALCchar *)) dlsym(handle, "alcLoopbackOpenDeviceSOFT");
-    fn.alcIsRenderFormatSupportedSOFT = (ALCboolean (*)(ALCdevice *, ALCsizei, ALCenum, ALCenum)) dlsym(handle, "alcIsRenderFormatSupportedSOFT");
-    fn.alcRenderSamplesSOFT = (void (*)(ALCdevice *, ALCvoid *, ALCsizei)) dlsym(handle, "alcRenderSamplesSOFT");
-    fn.alcDevicePauseSOFT = (void (*)(ALCdevice *)) dlsym(handle, "alcDevicePauseSOFT");
-    fn.alcDeviceResumeSOFT = (void (*)(ALCdevice *)) dlsym(handle, "alcDeviceResumeSOFT");
-    fn.alcGetStringiSOFT = (const ALCchar * (*)(ALCdevice *, ALCenum, ALCsizei)) dlsym(handle, "alcGetStringiSOFT");
-    fn.alcResetDeviceSOFT = (ALCboolean (*)(ALCdevice *, const ALCint *)) dlsym(handle, "alcResetDeviceSOFT");
-    fn.alcGetInteger64vSOFT = (void (*)(ALCdevice *, ALCenum, ALsizei, ALCint64SOFT *)) dlsym(handle, "alcGetInteger64vSOFT");
-    fn.alcReopenDeviceSOFT = (ALCboolean (*)(ALCdevice *, const ALCchar *, const ALCint *)) dlsym(handle, "alcReopenDeviceSOFT");
-    fn.alcEventIsSupportedSOFT = (ALCenum (*)(ALCenum, ALCenum)) dlsym(handle, "alcEventIsSupportedSOFT");
-    fn.alcEventControlSOFT = (ALCboolean (*)(ALCsizei, const ALCenum *, ALCboolean)) dlsym(handle, "alcEventControlSOFT");
-    fn.alcGetProcAddress2 = (ALCvoid * (*)(ALCdevice *, const ALCchar *)) dlsym(handle, "alcGetProcAddress2");
-    fn.alcSetThreadContext = (ALCboolean (*)(ALCcontext *)) dlsym(handle, "alcSetThreadContext");
-    fn.alcGetThreadContext = (ALCcontext * (*)(void)) dlsym(handle, "alcGetThreadContext");
+    candidate.alEnable = (void (*)(ALenum)) lookup(handle, "alEnable");
+    candidate.alDisable = (void (*)(ALenum)) lookup(handle, "alDisable");
+    candidate.alIsEnabled = (ALboolean (*)(ALenum)) lookup(handle, "alIsEnabled");
+    candidate.alDopplerFactor = (void (*)(ALfloat)) lookup(handle, "alDopplerFactor");
+    candidate.alDopplerVelocity = (void (*)(ALfloat)) lookup(handle, "alDopplerVelocity");
+    candidate.alSpeedOfSound = (void (*)(ALfloat)) lookup(handle, "alSpeedOfSound");
+    candidate.alDistanceModel = (void (*)(ALenum)) lookup(handle, "alDistanceModel");
+    candidate.alGetString = (const ALchar * (*)(ALenum)) lookup(handle, "alGetString");
+    candidate.alGetBooleanv = (void (*)(ALenum, ALboolean *)) lookup(handle, "alGetBooleanv");
+    candidate.alGetIntegerv = (void (*)(ALenum, ALint *)) lookup(handle, "alGetIntegerv");
+    candidate.alGetFloatv = (void (*)(ALenum, ALfloat *)) lookup(handle, "alGetFloatv");
+    candidate.alGetDoublev = (void (*)(ALenum, ALdouble *)) lookup(handle, "alGetDoublev");
+    candidate.alGetBoolean = (ALboolean (*)(ALenum)) lookup(handle, "alGetBoolean");
+    candidate.alGetInteger = (ALint (*)(ALenum)) lookup(handle, "alGetInteger");
+    candidate.alGetFloat = (ALfloat (*)(ALenum)) lookup(handle, "alGetFloat");
+    candidate.alGetDouble = (ALdouble (*)(ALenum)) lookup(handle, "alGetDouble");
+    candidate.alGetError = (ALenum (*)(void)) lookup(handle, "alGetError");
+    candidate.alIsExtensionPresent = (ALboolean (*)(const ALchar *)) lookup(handle, "alIsExtensionPresent");
+    candidate.alGetProcAddress = (void* (*)(const ALchar *)) lookup(handle, "alGetProcAddress");
+    candidate.alGetEnumValue = (ALenum (*)(const ALchar *)) lookup(handle, "alGetEnumValue");
+    candidate.alListenerf = (void (*)(ALenum, ALfloat)) lookup(handle, "alListenerf");
+    candidate.alListener3f = (void (*)(ALenum, ALfloat, ALfloat, ALfloat)) lookup(handle, "alListener3f");
+    candidate.alListenerfv = (void (*)(ALenum, const ALfloat *)) lookup(handle, "alListenerfv");
+    candidate.alListeneri = (void (*)(ALenum, ALint)) lookup(handle, "alListeneri");
+    candidate.alListener3i = (void (*)(ALenum, ALint, ALint, ALint)) lookup(handle, "alListener3i");
+    candidate.alListeneriv = (void (*)(ALenum, const ALint *)) lookup(handle, "alListeneriv");
+    candidate.alGetListenerf = (void (*)(ALenum, ALfloat *)) lookup(handle, "alGetListenerf");
+    candidate.alGetListener3f = (void (*)(ALenum, ALfloat *, ALfloat *, ALfloat *)) lookup(handle, "alGetListener3f");
+    candidate.alGetListenerfv = (void (*)(ALenum, ALfloat *)) lookup(handle, "alGetListenerfv");
+    candidate.alGetListeneri = (void (*)(ALenum, ALint *)) lookup(handle, "alGetListeneri");
+    candidate.alGetListener3i = (void (*)(ALenum, ALint *, ALint *, ALint *)) lookup(handle, "alGetListener3i");
+    candidate.alGetListeneriv = (void (*)(ALenum, ALint *)) lookup(handle, "alGetListeneriv");
+    candidate.alGenSources = (void (*)(ALsizei, ALuint *)) lookup(handle, "alGenSources");
+    candidate.alDeleteSources = (void (*)(ALsizei, const ALuint *)) lookup(handle, "alDeleteSources");
+    candidate.alIsSource = (ALboolean (*)(ALuint)) lookup(handle, "alIsSource");
+    candidate.alSourcef = (void (*)(ALuint, ALenum, ALfloat)) lookup(handle, "alSourcef");
+    candidate.alSource3f = (void (*)(ALuint, ALenum, ALfloat, ALfloat, ALfloat)) lookup(handle, "alSource3f");
+    candidate.alSourcefv = (void (*)(ALuint, ALenum, const ALfloat *)) lookup(handle, "alSourcefv");
+    candidate.alSourcei = (void (*)(ALuint, ALenum, ALint)) lookup(handle, "alSourcei");
+    candidate.alSource3i = (void (*)(ALuint, ALenum, ALint, ALint, ALint)) lookup(handle, "alSource3i");
+    candidate.alSourceiv = (void (*)(ALuint, ALenum, const ALint *)) lookup(handle, "alSourceiv");
+    candidate.alGetSourcef = (void (*)(ALuint, ALenum, ALfloat *)) lookup(handle, "alGetSourcef");
+    candidate.alGetSourcefv = (void (*)(ALuint, ALenum, ALfloat *)) lookup(handle, "alGetSourcefv");
+    candidate.alGetSourcei = (void (*)(ALuint, ALenum, ALint *)) lookup(handle, "alGetSourcei");
+    candidate.alGetSourceiv = (void (*)(ALuint, ALenum, ALint *)) lookup(handle, "alGetSourceiv");
+    candidate.alGetSource3i = (void (*)(ALuint, ALenum, ALint *, ALint *, ALint *)) lookup(handle, "alGetSource3i");
+    candidate.alGetSource3f = (void (*)(ALuint, ALenum, ALfloat *, ALfloat *, ALfloat *)) lookup(handle, "alGetSource3f");
+    candidate.alSourcePlay = (void (*)(ALuint)) lookup(handle, "alSourcePlay");
+    candidate.alSourceStop = (void (*)(ALuint)) lookup(handle, "alSourceStop");
+    candidate.alSourceRewind = (void (*)(ALuint)) lookup(handle, "alSourceRewind");
+    candidate.alSourcePause = (void (*)(ALuint)) lookup(handle, "alSourcePause");
+    candidate.alSourcePlayv = (void (*)(ALsizei, const ALuint *)) lookup(handle, "alSourcePlayv");
+    candidate.alSourceStopv = (void (*)(ALsizei, const ALuint *)) lookup(handle, "alSourceStopv");
+    candidate.alSourceRewindv = (void (*)(ALsizei, const ALuint *)) lookup(handle, "alSourceRewindv");
+    candidate.alSourcePausev = (void (*)(ALsizei, const ALuint *)) lookup(handle, "alSourcePausev");
+    candidate.alSourceQueueBuffers = (void (*)(ALuint, ALsizei, const ALuint *)) lookup(handle, "alSourceQueueBuffers");
+    candidate.alSourceUnqueueBuffers = (void (*)(ALuint, ALsizei, ALuint *)) lookup(handle, "alSourceUnqueueBuffers");
+    candidate.alGenBuffers = (void (*)(ALsizei, ALuint *)) lookup(handle, "alGenBuffers");
+    candidate.alDeleteBuffers = (void (*)(ALsizei, const ALuint *)) lookup(handle, "alDeleteBuffers");
+    candidate.alIsBuffer = (ALboolean (*)(ALuint)) lookup(handle, "alIsBuffer");
+    candidate.alBufferData = (void (*)(ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) lookup(handle, "alBufferData");
+    candidate.alBufferf = (void (*)(ALuint, ALenum, ALfloat)) lookup(handle, "alBufferf");
+    candidate.alBuffer3f = (void (*)(ALuint, ALenum, ALfloat, ALfloat, ALfloat)) lookup(handle, "alBuffer3f");
+    candidate.alBufferfv = (void (*)(ALuint, ALenum, const ALfloat *)) lookup(handle, "alBufferfv");
+    candidate.alBufferi = (void (*)(ALuint, ALenum, ALint)) lookup(handle, "alBufferi");
+    candidate.alBuffer3i = (void (*)(ALuint, ALenum, ALint, ALint, ALint)) lookup(handle, "alBuffer3i");
+    candidate.alBufferiv = (void (*)(ALuint, ALenum, const ALint *)) lookup(handle, "alBufferiv");
+    candidate.alGetBufferf = (void (*)(ALuint, ALenum, ALfloat *)) lookup(handle, "alGetBufferf");
+    candidate.alGetBufferfv = (void (*)(ALuint, ALenum, ALfloat *)) lookup(handle, "alGetBufferfv");
+    candidate.alGetBufferi = (void (*)(ALuint, ALenum, ALint *)) lookup(handle, "alGetBufferi");
+    candidate.alGetBufferiv = (void (*)(ALuint, ALenum, ALint *)) lookup(handle, "alGetBufferiv");
+    candidate.alGetBuffer3i = (void (*)(ALuint, ALenum, ALint *, ALint *, ALint *)) lookup(handle, "alGetBuffer3i");
+    candidate.alGetBuffer3f = (void (*)(ALuint, ALenum, ALfloat *, ALfloat *, ALfloat *)) lookup(handle, "alGetBuffer3f");
+    candidate.alBufferDataStatic = (void (*)(ALuint, ALenum, ALvoid *, ALsizei, ALsizei)) lookup(handle, "alBufferDataStatic");
+    candidate.alGenEffects = (void (*)(ALsizei, ALuint *)) lookup(handle, "alGenEffects");
+    candidate.alDeleteEffects = (void (*)(ALsizei, const ALuint *)) lookup(handle, "alDeleteEffects");
+    candidate.alIsEffect = (ALboolean (*)(ALuint)) lookup(handle, "alIsEffect");
+    candidate.alEffecti = (void (*)(ALuint, ALenum, ALint)) lookup(handle, "alEffecti");
+    candidate.alEffectiv = (void (*)(ALuint, ALenum, const ALint *)) lookup(handle, "alEffectiv");
+    candidate.alEffectf = (void (*)(ALuint, ALenum, ALfloat)) lookup(handle, "alEffectf");
+    candidate.alEffectfv = (void (*)(ALuint, ALenum, const ALfloat *)) lookup(handle, "alEffectfv");
+    candidate.alGetEffecti = (void (*)(ALuint, ALenum, ALint *)) lookup(handle, "alGetEffecti");
+    candidate.alGetEffectiv = (void (*)(ALuint, ALenum, ALint *)) lookup(handle, "alGetEffectiv");
+    candidate.alGetEffectf = (void (*)(ALuint, ALenum, ALfloat *)) lookup(handle, "alGetEffectf");
+    candidate.alGetEffectfv = (void (*)(ALuint, ALenum, ALfloat *)) lookup(handle, "alGetEffectfv");
+    candidate.alGenFilters = (void (*)(ALsizei, ALuint *)) lookup(handle, "alGenFilters");
+    candidate.alDeleteFilters = (void (*)(ALsizei, const ALuint *)) lookup(handle, "alDeleteFilters");
+    candidate.alIsFilter = (ALboolean (*)(ALuint)) lookup(handle, "alIsFilter");
+    candidate.alFilteri = (void (*)(ALuint, ALenum, ALint)) lookup(handle, "alFilteri");
+    candidate.alFilteriv = (void (*)(ALuint, ALenum, const ALint *)) lookup(handle, "alFilteriv");
+    candidate.alFilterf = (void (*)(ALuint, ALenum, ALfloat)) lookup(handle, "alFilterf");
+    candidate.alFilterfv = (void (*)(ALuint, ALenum, const ALfloat *)) lookup(handle, "alFilterfv");
+    candidate.alGetFilteri = (void (*)(ALuint, ALenum, ALint *)) lookup(handle, "alGetFilteri");
+    candidate.alGetFilteriv = (void (*)(ALuint, ALenum, ALint *)) lookup(handle, "alGetFilteriv");
+    candidate.alGetFilterf = (void (*)(ALuint, ALenum, ALfloat *)) lookup(handle, "alGetFilterf");
+    candidate.alGetFilterfv = (void (*)(ALuint, ALenum, ALfloat *)) lookup(handle, "alGetFilterfv");
+    candidate.alGenAuxiliaryEffectSlots = (void (*)(ALsizei, ALuint *)) lookup(handle, "alGenAuxiliaryEffectSlots");
+    candidate.alDeleteAuxiliaryEffectSlots = (void (*)(ALsizei, const ALuint *)) lookup(handle, "alDeleteAuxiliaryEffectSlots");
+    candidate.alIsAuxiliaryEffectSlot = (ALboolean (*)(ALuint)) lookup(handle, "alIsAuxiliaryEffectSlot");
+    candidate.alAuxiliaryEffectSloti = (void (*)(ALuint, ALenum, ALint)) lookup(handle, "alAuxiliaryEffectSloti");
+    candidate.alAuxiliaryEffectSlotiv = (void (*)(ALuint, ALenum, const ALint *)) lookup(handle, "alAuxiliaryEffectSlotiv");
+    candidate.alAuxiliaryEffectSlotf = (void (*)(ALuint, ALenum, ALfloat)) lookup(handle, "alAuxiliaryEffectSlotf");
+    candidate.alAuxiliaryEffectSlotfv = (void (*)(ALuint, ALenum, const ALfloat *)) lookup(handle, "alAuxiliaryEffectSlotfv");
+    candidate.alGetAuxiliaryEffectSloti = (void (*)(ALuint, ALenum, ALint *)) lookup(handle, "alGetAuxiliaryEffectSloti");
+    candidate.alGetAuxiliaryEffectSlotiv = (void (*)(ALuint, ALenum, ALint *)) lookup(handle, "alGetAuxiliaryEffectSlotiv");
+    candidate.alGetAuxiliaryEffectSlotf = (void (*)(ALuint, ALenum, ALfloat *)) lookup(handle, "alGetAuxiliaryEffectSlotf");
+    candidate.alGetAuxiliaryEffectSlotfv = (void (*)(ALuint, ALenum, ALfloat *)) lookup(handle, "alGetAuxiliaryEffectSlotfv");
+    candidate.alBufferSubDataSOFT = (void (*)(ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) lookup(handle, "alBufferSubDataSOFT");
+    candidate.alRequestFoldbackStop = (void (*)(void)) lookup(handle, "alRequestFoldbackStop");
+    candidate.alBufferSamplesSOFT = (void (*)(ALuint, ALuint, ALenum, ALsizei, ALenum, ALenum, const ALvoid *)) lookup(handle, "alBufferSamplesSOFT");
+    candidate.alBufferSubSamplesSOFT = (void (*)(ALuint, ALsizei, ALsizei, ALenum, ALenum, const ALvoid *)) lookup(handle, "alBufferSubSamplesSOFT");
+    candidate.alGetBufferSamplesSOFT = (void (*)(ALuint, ALsizei, ALsizei, ALenum, ALenum, ALvoid *)) lookup(handle, "alGetBufferSamplesSOFT");
+    candidate.alIsBufferFormatSupportedSOFT = (ALboolean (*)(ALenum)) lookup(handle, "alIsBufferFormatSupportedSOFT");
+    candidate.alSourcedSOFT = (void (*)(ALuint, ALenum, ALdouble)) lookup(handle, "alSourcedSOFT");
+    candidate.alSource3dSOFT = (void (*)(ALuint, ALenum, ALdouble, ALdouble, ALdouble)) lookup(handle, "alSource3dSOFT");
+    candidate.alSourcedvSOFT = (void (*)(ALuint, ALenum, const ALdouble *)) lookup(handle, "alSourcedvSOFT");
+    candidate.alGetSourcedSOFT = (void (*)(ALuint, ALenum, ALdouble *)) lookup(handle, "alGetSourcedSOFT");
+    candidate.alGetSource3dSOFT = (void (*)(ALuint, ALenum, ALdouble *, ALdouble *, ALdouble *)) lookup(handle, "alGetSource3dSOFT");
+    candidate.alGetSourcedvSOFT = (void (*)(ALuint, ALenum, ALdouble *)) lookup(handle, "alGetSourcedvSOFT");
+    candidate.alSourcei64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT)) lookup(handle, "alSourcei64SOFT");
+    candidate.alSource3i64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT, ALint64SOFT, ALint64SOFT)) lookup(handle, "alSource3i64SOFT");
+    candidate.alSourcei64vSOFT = (void (*)(ALuint, ALenum, const ALint64SOFT *)) lookup(handle, "alSourcei64vSOFT");
+    candidate.alGetSourcei64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT *)) lookup(handle, "alGetSourcei64SOFT");
+    candidate.alGetSource3i64SOFT = (void (*)(ALuint, ALenum, ALint64SOFT *, ALint64SOFT *, ALint64SOFT *)) lookup(handle, "alGetSource3i64SOFT");
+    candidate.alGetSourcei64vSOFT = (void (*)(ALuint, ALenum, ALint64SOFT *)) lookup(handle, "alGetSourcei64vSOFT");
+    candidate.alDeferUpdatesSOFT = (void (*)(void)) lookup(handle, "alDeferUpdatesSOFT");
+    candidate.alProcessUpdatesSOFT = (void (*)(void)) lookup(handle, "alProcessUpdatesSOFT");
+    candidate.alGetStringiSOFT = (const ALchar * (*)(ALenum, ALsizei)) lookup(handle, "alGetStringiSOFT");
+    candidate.alEventControlSOFT = (void (*)(ALsizei, const ALenum *, ALboolean)) lookup(handle, "alEventControlSOFT");
+    candidate.alGetPointerSOFT = (void* (*)(ALenum)) lookup(handle, "alGetPointerSOFT");
+    candidate.alGetPointervSOFT = (void (*)(ALenum, void **)) lookup(handle, "alGetPointervSOFT");
+    candidate.alGetBufferPtrSOFT = (void (*)(ALuint, ALenum, ALvoid **)) lookup(handle, "alGetBufferPtrSOFT");
+    candidate.alGetBuffer3PtrSOFT = (void (*)(ALuint, ALenum, ALvoid **, ALvoid **, ALvoid **)) lookup(handle, "alGetBuffer3PtrSOFT");
+    candidate.alGetBufferPtrvSOFT = (void (*)(ALuint, ALenum, ALvoid **)) lookup(handle, "alGetBufferPtrvSOFT");
+    candidate.alSourcePlayAtTimeSOFT = (void (*)(ALuint, ALint64SOFT)) lookup(handle, "alSourcePlayAtTimeSOFT");
+    candidate.alSourcePlayAtTimevSOFT = (void (*)(ALsizei, const ALuint *, ALint64SOFT)) lookup(handle, "alSourcePlayAtTimevSOFT");
+    candidate.alDebugMessageInsertEXT = (void (*)(ALenum, ALenum, ALuint, ALenum, ALsizei, const ALchar *)) lookup(handle, "alDebugMessageInsertEXT");
+    candidate.alDebugMessageControlEXT = (void (*)(ALenum, ALenum, ALenum, ALsizei, const ALuint *, ALboolean)) lookup(handle, "alDebugMessageControlEXT");
+    candidate.alPushDebugGroupEXT = (void (*)(ALenum, ALuint, ALsizei, const ALchar *)) lookup(handle, "alPushDebugGroupEXT");
+    candidate.alPopDebugGroupEXT = (void (*)(void)) lookup(handle, "alPopDebugGroupEXT");
+    candidate.alGetDebugMessageLogEXT = (ALuint (*)(ALuint, ALsizei, ALenum *, ALenum *, ALuint *, ALenum *, ALsizei *, ALchar *)) lookup(handle, "alGetDebugMessageLogEXT");
+    candidate.alObjectLabelEXT = (void (*)(ALenum, ALuint, ALsizei, const ALchar *)) lookup(handle, "alObjectLabelEXT");
+    candidate.alGetObjectLabelEXT = (void (*)(ALenum, ALuint, ALsizei, ALsizei *, ALchar *)) lookup(handle, "alGetObjectLabelEXT");
+    candidate.alGetPointerEXT = (void* (*)(ALenum)) lookup(handle, "alGetPointerEXT");
+    candidate.alGetPointervEXT = (void (*)(ALenum, void **)) lookup(handle, "alGetPointervEXT");
+    candidate.alEnableDirect = (void (*)(ALCcontext *, ALenum)) lookup(handle, "alEnableDirect");
+    candidate.alDisableDirect = (void (*)(ALCcontext *, ALenum)) lookup(handle, "alDisableDirect");
+    candidate.alIsEnabledDirect = (ALboolean (*)(ALCcontext *, ALenum)) lookup(handle, "alIsEnabledDirect");
+    candidate.alDopplerFactorDirect = (void (*)(ALCcontext *, ALfloat)) lookup(handle, "alDopplerFactorDirect");
+    candidate.alSpeedOfSoundDirect = (void (*)(ALCcontext *, ALfloat)) lookup(handle, "alSpeedOfSoundDirect");
+    candidate.alDistanceModelDirect = (void (*)(ALCcontext *, ALenum)) lookup(handle, "alDistanceModelDirect");
+    candidate.alGetStringDirect = (const ALchar * (*)(ALCcontext *, ALenum)) lookup(handle, "alGetStringDirect");
+    candidate.alGetBooleanvDirect = (void (*)(ALCcontext *, ALenum, ALboolean *)) lookup(handle, "alGetBooleanvDirect");
+    candidate.alGetIntegervDirect = (void (*)(ALCcontext *, ALenum, ALint *)) lookup(handle, "alGetIntegervDirect");
+    candidate.alGetFloatvDirect = (void (*)(ALCcontext *, ALenum, ALfloat *)) lookup(handle, "alGetFloatvDirect");
+    candidate.alGetDoublevDirect = (void (*)(ALCcontext *, ALenum, ALdouble *)) lookup(handle, "alGetDoublevDirect");
+    candidate.alGetBooleanDirect = (ALboolean (*)(ALCcontext *, ALenum)) lookup(handle, "alGetBooleanDirect");
+    candidate.alGetIntegerDirect = (ALint (*)(ALCcontext *, ALenum)) lookup(handle, "alGetIntegerDirect");
+    candidate.alGetFloatDirect = (ALfloat (*)(ALCcontext *, ALenum)) lookup(handle, "alGetFloatDirect");
+    candidate.alGetDoubleDirect = (ALdouble (*)(ALCcontext *, ALenum)) lookup(handle, "alGetDoubleDirect");
+    candidate.alGetErrorDirect = (ALenum (*)(ALCcontext *)) lookup(handle, "alGetErrorDirect");
+    candidate.alIsExtensionPresentDirect = (ALboolean (*)(ALCcontext *, const ALchar *)) lookup(handle, "alIsExtensionPresentDirect");
+    candidate.alGetProcAddressDirect = (void* (*)(ALCcontext *, const ALchar *)) lookup(handle, "alGetProcAddressDirect");
+    candidate.alGetEnumValueDirect = (ALenum (*)(ALCcontext *, const ALchar *)) lookup(handle, "alGetEnumValueDirect");
+    candidate.alListenerfDirect = (void (*)(ALCcontext *, ALenum, ALfloat)) lookup(handle, "alListenerfDirect");
+    candidate.alListener3fDirect = (void (*)(ALCcontext *, ALenum, ALfloat, ALfloat, ALfloat)) lookup(handle, "alListener3fDirect");
+    candidate.alListenerfvDirect = (void (*)(ALCcontext *, ALenum, const ALfloat *)) lookup(handle, "alListenerfvDirect");
+    candidate.alListeneriDirect = (void (*)(ALCcontext *, ALenum, ALint)) lookup(handle, "alListeneriDirect");
+    candidate.alListener3iDirect = (void (*)(ALCcontext *, ALenum, ALint, ALint, ALint)) lookup(handle, "alListener3iDirect");
+    candidate.alListenerivDirect = (void (*)(ALCcontext *, ALenum, const ALint *)) lookup(handle, "alListenerivDirect");
+    candidate.alGetListenerfDirect = (void (*)(ALCcontext *, ALenum, ALfloat *)) lookup(handle, "alGetListenerfDirect");
+    candidate.alGetListener3fDirect = (void (*)(ALCcontext *, ALenum, ALfloat *, ALfloat *, ALfloat *)) lookup(handle, "alGetListener3fDirect");
+    candidate.alGetListenerfvDirect = (void (*)(ALCcontext *, ALenum, ALfloat *)) lookup(handle, "alGetListenerfvDirect");
+    candidate.alGetListeneriDirect = (void (*)(ALCcontext *, ALenum, ALint *)) lookup(handle, "alGetListeneriDirect");
+    candidate.alGetListener3iDirect = (void (*)(ALCcontext *, ALenum, ALint *, ALint *, ALint *)) lookup(handle, "alGetListener3iDirect");
+    candidate.alGetListenerivDirect = (void (*)(ALCcontext *, ALenum, ALint *)) lookup(handle, "alGetListenerivDirect");
+    candidate.alGenSourcesDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) lookup(handle, "alGenSourcesDirect");
+    candidate.alDeleteSourcesDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(handle, "alDeleteSourcesDirect");
+    candidate.alIsSourceDirect = (ALboolean (*)(ALCcontext *, ALuint)) lookup(handle, "alIsSourceDirect");
+    candidate.alSourcefDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) lookup(handle, "alSourcefDirect");
+    candidate.alSource3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat, ALfloat, ALfloat)) lookup(handle, "alSource3fDirect");
+    candidate.alSourcefvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) lookup(handle, "alSourcefvDirect");
+    candidate.alSourceiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) lookup(handle, "alSourceiDirect");
+    candidate.alSource3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint, ALint, ALint)) lookup(handle, "alSource3iDirect");
+    candidate.alSourceivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) lookup(handle, "alSourceivDirect");
+    candidate.alGetSourcefDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(handle, "alGetSourcefDirect");
+    candidate.alGetSource3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *, ALfloat *, ALfloat *)) lookup(handle, "alGetSource3fDirect");
+    candidate.alGetSourcefvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(handle, "alGetSourcefvDirect");
+    candidate.alGetSourceiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(handle, "alGetSourceiDirect");
+    candidate.alGetSource3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *, ALint *, ALint *)) lookup(handle, "alGetSource3iDirect");
+    candidate.alGetSourceivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(handle, "alGetSourceivDirect");
+    candidate.alSourcePlayDirect = (void (*)(ALCcontext *, ALuint)) lookup(handle, "alSourcePlayDirect");
+    candidate.alSourceStopDirect = (void (*)(ALCcontext *, ALuint)) lookup(handle, "alSourceStopDirect");
+    candidate.alSourceRewindDirect = (void (*)(ALCcontext *, ALuint)) lookup(handle, "alSourceRewindDirect");
+    candidate.alSourcePauseDirect = (void (*)(ALCcontext *, ALuint)) lookup(handle, "alSourcePauseDirect");
+    candidate.alSourcePlayvDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(handle, "alSourcePlayvDirect");
+    candidate.alSourceStopvDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(handle, "alSourceStopvDirect");
+    candidate.alSourceRewindvDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(handle, "alSourceRewindvDirect");
+    candidate.alSourcePausevDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(handle, "alSourcePausevDirect");
+    candidate.alSourceQueueBuffersDirect = (void (*)(ALCcontext *, ALuint, ALsizei, const ALuint *)) lookup(handle, "alSourceQueueBuffersDirect");
+    candidate.alSourceUnqueueBuffersDirect = (void (*)(ALCcontext *, ALuint, ALsizei, ALuint *)) lookup(handle, "alSourceUnqueueBuffersDirect");
+    candidate.alGenBuffersDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) lookup(handle, "alGenBuffersDirect");
+    candidate.alDeleteBuffersDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(handle, "alDeleteBuffersDirect");
+    candidate.alIsBufferDirect = (ALboolean (*)(ALCcontext *, ALuint)) lookup(handle, "alIsBufferDirect");
+    candidate.alBufferDataDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) lookup(handle, "alBufferDataDirect");
+    candidate.alBufferfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) lookup(handle, "alBufferfDirect");
+    candidate.alBuffer3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat, ALfloat, ALfloat)) lookup(handle, "alBuffer3fDirect");
+    candidate.alBufferfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) lookup(handle, "alBufferfvDirect");
+    candidate.alBufferiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) lookup(handle, "alBufferiDirect");
+    candidate.alBuffer3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint, ALint, ALint)) lookup(handle, "alBuffer3iDirect");
+    candidate.alBufferivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) lookup(handle, "alBufferivDirect");
+    candidate.alGetBufferfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(handle, "alGetBufferfDirect");
+    candidate.alGetBuffer3fDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *, ALfloat *, ALfloat *)) lookup(handle, "alGetBuffer3fDirect");
+    candidate.alGetBufferfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(handle, "alGetBufferfvDirect");
+    candidate.alGetBufferiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(handle, "alGetBufferiDirect");
+    candidate.alGetBuffer3iDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *, ALint *, ALint *)) lookup(handle, "alGetBuffer3iDirect");
+    candidate.alGetBufferivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(handle, "alGetBufferivDirect");
+    candidate.alGenEffectsDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) lookup(handle, "alGenEffectsDirect");
+    candidate.alDeleteEffectsDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(handle, "alDeleteEffectsDirect");
+    candidate.alIsEffectDirect = (ALboolean (*)(ALCcontext *, ALuint)) lookup(handle, "alIsEffectDirect");
+    candidate.alEffectiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) lookup(handle, "alEffectiDirect");
+    candidate.alEffectivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) lookup(handle, "alEffectivDirect");
+    candidate.alEffectfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) lookup(handle, "alEffectfDirect");
+    candidate.alEffectfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) lookup(handle, "alEffectfvDirect");
+    candidate.alGetEffectiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(handle, "alGetEffectiDirect");
+    candidate.alGetEffectivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(handle, "alGetEffectivDirect");
+    candidate.alGetEffectfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(handle, "alGetEffectfDirect");
+    candidate.alGetEffectfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(handle, "alGetEffectfvDirect");
+    candidate.alGenFiltersDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) lookup(handle, "alGenFiltersDirect");
+    candidate.alDeleteFiltersDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(handle, "alDeleteFiltersDirect");
+    candidate.alIsFilterDirect = (ALboolean (*)(ALCcontext *, ALuint)) lookup(handle, "alIsFilterDirect");
+    candidate.alFilteriDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) lookup(handle, "alFilteriDirect");
+    candidate.alFilterivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) lookup(handle, "alFilterivDirect");
+    candidate.alFilterfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) lookup(handle, "alFilterfDirect");
+    candidate.alFilterfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) lookup(handle, "alFilterfvDirect");
+    candidate.alGetFilteriDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(handle, "alGetFilteriDirect");
+    candidate.alGetFilterivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(handle, "alGetFilterivDirect");
+    candidate.alGetFilterfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(handle, "alGetFilterfDirect");
+    candidate.alGetFilterfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(handle, "alGetFilterfvDirect");
+    candidate.alGenAuxiliaryEffectSlotsDirect = (void (*)(ALCcontext *, ALsizei, ALuint *)) lookup(handle, "alGenAuxiliaryEffectSlotsDirect");
+    candidate.alDeleteAuxiliaryEffectSlotsDirect = (void (*)(ALCcontext *, ALsizei, const ALuint *)) lookup(handle, "alDeleteAuxiliaryEffectSlotsDirect");
+    candidate.alIsAuxiliaryEffectSlotDirect = (ALboolean (*)(ALCcontext *, ALuint)) lookup(handle, "alIsAuxiliaryEffectSlotDirect");
+    candidate.alAuxiliaryEffectSlotiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint)) lookup(handle, "alAuxiliaryEffectSlotiDirect");
+    candidate.alAuxiliaryEffectSlotivDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALint *)) lookup(handle, "alAuxiliaryEffectSlotivDirect");
+    candidate.alAuxiliaryEffectSlotfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat)) lookup(handle, "alAuxiliaryEffectSlotfDirect");
+    candidate.alAuxiliaryEffectSlotfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, const ALfloat *)) lookup(handle, "alAuxiliaryEffectSlotfvDirect");
+    candidate.alGetAuxiliaryEffectSlotiDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(handle, "alGetAuxiliaryEffectSlotiDirect");
+    candidate.alGetAuxiliaryEffectSlotivDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALint *)) lookup(handle, "alGetAuxiliaryEffectSlotivDirect");
+    candidate.alGetAuxiliaryEffectSlotfDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(handle, "alGetAuxiliaryEffectSlotfDirect");
+    candidate.alGetAuxiliaryEffectSlotfvDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALfloat *)) lookup(handle, "alGetAuxiliaryEffectSlotfvDirect");
+    candidate.alBufferDataStaticDirect = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid *, ALsizei, ALsizei)) lookup(handle, "alBufferDataStaticDirect");
+    candidate.alDebugMessageInsertDirectEXT = (void (*)(ALCcontext *, ALenum, ALenum, ALuint, ALenum, ALsizei, const ALchar *)) lookup(handle, "alDebugMessageInsertDirectEXT");
+    candidate.alDebugMessageControlDirectEXT = (void (*)(ALCcontext *, ALenum, ALenum, ALenum, ALsizei, const ALuint *, ALboolean)) lookup(handle, "alDebugMessageControlDirectEXT");
+    candidate.alPushDebugGroupDirectEXT = (void (*)(ALCcontext *, ALenum, ALuint, ALsizei, const ALchar *)) lookup(handle, "alPushDebugGroupDirectEXT");
+    candidate.alPopDebugGroupDirectEXT = (void (*)(ALCcontext *)) lookup(handle, "alPopDebugGroupDirectEXT");
+    candidate.alGetDebugMessageLogDirectEXT = (ALuint (*)(ALCcontext *, ALuint, ALsizei, ALenum *, ALenum *, ALuint *, ALenum *, ALsizei *, ALchar *)) lookup(handle, "alGetDebugMessageLogDirectEXT");
+    candidate.alObjectLabelDirectEXT = (void (*)(ALCcontext *, ALenum, ALuint, ALsizei, const ALchar *)) lookup(handle, "alObjectLabelDirectEXT");
+    candidate.alGetObjectLabelDirectEXT = (void (*)(ALCcontext *, ALenum, ALuint, ALsizei, ALsizei *, ALchar *)) lookup(handle, "alGetObjectLabelDirectEXT");
+    candidate.alGetPointerDirectEXT = (void* (*)(ALCcontext *, ALenum)) lookup(handle, "alGetPointerDirectEXT");
+    candidate.alGetPointervDirectEXT = (void (*)(ALCcontext *, ALenum, void **)) lookup(handle, "alGetPointervDirectEXT");
+    candidate.alRequestFoldbackStopDirect = (void (*)(ALCcontext *)) lookup(handle, "alRequestFoldbackStopDirect");
+    candidate.alBufferSubDataDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, const ALvoid *, ALsizei, ALsizei)) lookup(handle, "alBufferSubDataDirectSOFT");
+    candidate.alSourcedDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble)) lookup(handle, "alSourcedDirectSOFT");
+    candidate.alSource3dDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble, ALdouble, ALdouble)) lookup(handle, "alSource3dDirectSOFT");
+    candidate.alSourcedvDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, const ALdouble *)) lookup(handle, "alSourcedvDirectSOFT");
+    candidate.alGetSourcedDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble *)) lookup(handle, "alGetSourcedDirectSOFT");
+    candidate.alGetSource3dDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble *, ALdouble *, ALdouble *)) lookup(handle, "alGetSource3dDirectSOFT");
+    candidate.alGetSourcedvDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALdouble *)) lookup(handle, "alGetSourcedvDirectSOFT");
+    candidate.alSourcei64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT)) lookup(handle, "alSourcei64DirectSOFT");
+    candidate.alSource3i64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT, ALint64SOFT, ALint64SOFT)) lookup(handle, "alSource3i64DirectSOFT");
+    candidate.alSourcei64vDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, const ALint64SOFT *)) lookup(handle, "alSourcei64vDirectSOFT");
+    candidate.alGetSourcei64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT *)) lookup(handle, "alGetSourcei64DirectSOFT");
+    candidate.alGetSource3i64DirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT *, ALint64SOFT *, ALint64SOFT *)) lookup(handle, "alGetSource3i64DirectSOFT");
+    candidate.alGetSourcei64vDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALint64SOFT *)) lookup(handle, "alGetSourcei64vDirectSOFT");
+    candidate.alDeferUpdatesDirectSOFT = (void (*)(ALCcontext *)) lookup(handle, "alDeferUpdatesDirectSOFT");
+    candidate.alProcessUpdatesDirectSOFT = (void (*)(ALCcontext *)) lookup(handle, "alProcessUpdatesDirectSOFT");
+    candidate.alGetStringiDirectSOFT = (const ALchar * (*)(ALCcontext *, ALenum, ALsizei)) lookup(handle, "alGetStringiDirectSOFT");
+    candidate.alEventControlDirectSOFT = (void (*)(ALCcontext *, ALsizei, const ALenum *, ALboolean)) lookup(handle, "alEventControlDirectSOFT");
+    candidate.alGetPointerDirectSOFT = (void* (*)(ALCcontext *, ALenum)) lookup(handle, "alGetPointerDirectSOFT");
+    candidate.alGetPointervDirectSOFT = (void (*)(ALCcontext *, ALenum, void **)) lookup(handle, "alGetPointervDirectSOFT");
+    candidate.alGetBufferPtrDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid **)) lookup(handle, "alGetBufferPtrDirectSOFT");
+    candidate.alGetBuffer3PtrDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid **, ALvoid **, ALvoid **)) lookup(handle, "alGetBuffer3PtrDirectSOFT");
+    candidate.alGetBufferPtrvDirectSOFT = (void (*)(ALCcontext *, ALuint, ALenum, ALvoid **)) lookup(handle, "alGetBufferPtrvDirectSOFT");
+    candidate.alSourcePlayAtTimeDirectSOFT = (void (*)(ALCcontext *, ALuint, ALint64SOFT)) lookup(handle, "alSourcePlayAtTimeDirectSOFT");
+    candidate.alSourcePlayAtTimevDirectSOFT = (void (*)(ALCcontext *, ALsizei, const ALuint *, ALint64SOFT)) lookup(handle, "alSourcePlayAtTimevDirectSOFT");
+    candidate.EAXSetDirect = (ALenum (*)(ALCcontext *, const struct _GUID *, ALuint, ALuint, ALvoid *, ALuint)) lookup(handle, "EAXSetDirect");
+    candidate.EAXGetDirect = (ALenum (*)(ALCcontext *, const struct _GUID *, ALuint, ALuint, ALvoid *, ALuint)) lookup(handle, "EAXGetDirect");
+    candidate.EAXSetBufferModeDirect = (ALboolean (*)(ALCcontext *, ALsizei, const ALuint *, ALint)) lookup(handle, "EAXSetBufferModeDirect");
+    candidate.EAXGetBufferModeDirect = (ALenum (*)(ALCcontext *, ALuint, ALint *)) lookup(handle, "EAXGetBufferModeDirect");
+    candidate.alcCreateContext = (ALCcontext * (*)(ALCdevice *, const ALCint *)) lookup(handle, "alcCreateContext");
+    candidate.alcMakeContextCurrent = (ALCboolean (*)(ALCcontext *)) lookup(handle, "alcMakeContextCurrent");
+    candidate.alcProcessContext = (void (*)(ALCcontext *)) lookup(handle, "alcProcessContext");
+    candidate.alcSuspendContext = (void (*)(ALCcontext *)) lookup(handle, "alcSuspendContext");
+    candidate.alcDestroyContext = (void (*)(ALCcontext *)) lookup(handle, "alcDestroyContext");
+    candidate.alcGetCurrentContext = (ALCcontext * (*)(void)) lookup(handle, "alcGetCurrentContext");
+    candidate.alcGetContextsDevice = (ALCdevice * (*)(ALCcontext *)) lookup(handle, "alcGetContextsDevice");
+    candidate.alcOpenDevice = (ALCdevice * (*)(const ALCchar *)) lookup(handle, "alcOpenDevice");
+    candidate.alcCloseDevice = (ALCboolean (*)(ALCdevice *)) lookup(handle, "alcCloseDevice");
+    candidate.alcGetError = (ALCenum (*)(ALCdevice *)) lookup(handle, "alcGetError");
+    candidate.alcIsExtensionPresent = (ALCboolean (*)(ALCdevice *, const ALCchar *)) lookup(handle, "alcIsExtensionPresent");
+    candidate.alcGetProcAddress = (ALCvoid * (*)(ALCdevice *, const ALCchar *)) lookup(handle, "alcGetProcAddress");
+    candidate.alcGetEnumValue = (ALCenum (*)(ALCdevice *, const ALCchar *)) lookup(handle, "alcGetEnumValue");
+    candidate.alcGetString = (const ALCchar * (*)(ALCdevice *, ALCenum)) lookup(handle, "alcGetString");
+    candidate.alcGetIntegerv = (void (*)(ALCdevice *, ALCenum, ALCsizei, ALCint *)) lookup(handle, "alcGetIntegerv");
+    candidate.alcCaptureOpenDevice = (ALCdevice * (*)(const ALCchar *, ALCuint, ALCenum, ALCsizei)) lookup(handle, "alcCaptureOpenDevice");
+    candidate.alcCaptureCloseDevice = (ALCboolean (*)(ALCdevice *)) lookup(handle, "alcCaptureCloseDevice");
+    candidate.alcCaptureStart = (void (*)(ALCdevice *)) lookup(handle, "alcCaptureStart");
+    candidate.alcCaptureStop = (void (*)(ALCdevice *)) lookup(handle, "alcCaptureStop");
+    candidate.alcCaptureSamples = (void (*)(ALCdevice *, ALCvoid *, ALCsizei)) lookup(handle, "alcCaptureSamples");
+    candidate.alcLoopbackOpenDeviceSOFT = (ALCdevice * (*)(const ALCchar *)) lookup(handle, "alcLoopbackOpenDeviceSOFT");
+    candidate.alcIsRenderFormatSupportedSOFT = (ALCboolean (*)(ALCdevice *, ALCsizei, ALCenum, ALCenum)) lookup(handle, "alcIsRenderFormatSupportedSOFT");
+    candidate.alcRenderSamplesSOFT = (void (*)(ALCdevice *, ALCvoid *, ALCsizei)) lookup(handle, "alcRenderSamplesSOFT");
+    candidate.alcDevicePauseSOFT = (void (*)(ALCdevice *)) lookup(handle, "alcDevicePauseSOFT");
+    candidate.alcDeviceResumeSOFT = (void (*)(ALCdevice *)) lookup(handle, "alcDeviceResumeSOFT");
+    candidate.alcGetStringiSOFT = (const ALCchar * (*)(ALCdevice *, ALCenum, ALCsizei)) lookup(handle, "alcGetStringiSOFT");
+    candidate.alcResetDeviceSOFT = (ALCboolean (*)(ALCdevice *, const ALCint *)) lookup(handle, "alcResetDeviceSOFT");
+    candidate.alcGetInteger64vSOFT = (void (*)(ALCdevice *, ALCenum, ALsizei, ALCint64SOFT *)) lookup(handle, "alcGetInteger64vSOFT");
+    candidate.alcReopenDeviceSOFT = (ALCboolean (*)(ALCdevice *, const ALCchar *, const ALCint *)) lookup(handle, "alcReopenDeviceSOFT");
+    candidate.alcEventIsSupportedSOFT = (ALCenum (*)(ALCenum, ALCenum)) lookup(handle, "alcEventIsSupportedSOFT");
+    candidate.alcEventControlSOFT = (ALCboolean (*)(ALCsizei, const ALCenum *, ALCboolean)) lookup(handle, "alcEventControlSOFT");
+    candidate.alcGetProcAddress2 = (ALCvoid * (*)(ALCdevice *, const ALCchar *)) lookup(handle, "alcGetProcAddress2");
+    candidate.alcSetThreadContext = (ALCboolean (*)(ALCcontext *)) lookup(handle, "alcSetThreadContext");
+    candidate.alcGetThreadContext = (ALCcontext * (*)(void)) lookup(handle, "alcGetThreadContext");
 #undef OPENAL_PY_BIND
 
+    if (require_devices)
+    {
+        ALCenum param = ALC_DEFAULT_DEVICE_SPECIFIER;
+        if (candidate.alcIsExtensionPresent(NULL, "ALC_ENUMERATE_ALL_EXT"))
+            param = 0x1013; /* ALC_ALL_DEVICES_SPECIFIER */
+        else if (candidate.alcIsExtensionPresent(NULL, "ALC_ENUMERATION_EXT"))
+            param = ALC_DEVICE_SPECIFIER;
+        const ALCchar* devices = candidate.alcGetString(NULL, param);
+        candidate.alcGetError(NULL);
+        if (!devices || !devices[0])
+        {
+            close_library(handle);
+            return 0;
+        }
+    }
+    path_copy = malloc(strlen(libpath) + 1);
+    if (!path_copy)
+    {
+        close_library(handle);
+        return 0;
+    }
+    strcpy(path_copy, libpath);
+    /* Commit only after validation; failed candidates leave no stale pointers. */
+    fn = candidate;
+    g_handle = handle;
+    g_libpath = path_copy;
     initialized = 1;
     return 1;
+}
+
+int openal_py_has_symbol(const char* name)
+{
+    return g_handle && lookup(g_handle, name) != NULL;
 }
 
 const char* openal_py_library_path(void)

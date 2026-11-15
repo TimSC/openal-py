@@ -196,7 +196,8 @@ def gen_pxd(cmds, typedefs) -> str:
         # avoid redefining the int64 aliases from <stdint.h> names
         lines.append(f"    ctypedef {c_type} {name}")
     lines += ["", 'cdef extern from "_api_table.h":',
-              "    bint openal_py_init(const char* libpath) nogil",
+              "    bint openal_py_init(const char* libpath, bint require_devices) nogil",
+              '    bint openal_py_has_symbol(const char* name) nogil',
               '    const char* openal_py_library_path() nogil', "",
               "    ctypedef void GUID", ""]
     for c in cmds:
@@ -211,7 +212,8 @@ def gen_c_header(cmds) -> str:
     lines = [HEADER, "#ifndef OPENAL_PY_API_TABLE_H", "#define OPENAL_PY_API_TABLE_H",
              "", "#include <AL/al.h>", "#include <AL/alc.h>", "#include <AL/alext.h>", "#include <stdint.h>",
              "", "#ifdef __cplusplus", 'extern "C" {', "#endif", ""]
-    lines.append("int openal_py_init(const char* libpath);")
+    lines.append("int openal_py_init(const char* libpath, int require_devices);")
+    lines.append("int openal_py_has_symbol(const char* name);")
     lines.append("const char* openal_py_library_path(void);")
     lines.append("")
     for c in cmds:
@@ -247,7 +249,11 @@ def gen_c_source(cmds) -> str:
 #define _GNU_SOURCE   /* strdup, POSIX dlfcn */
 #include "_api_table.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -259,6 +265,7 @@ typedef struct {{
 static ALPyTable fn;
 static int initialized = 0;
 static const char* g_libpath = NULL;
+static void* g_handle = NULL;
 
 static const char* const AL_PY_SYMBOLS[] = {{
 {chr(10).join(syms)}
@@ -266,42 +273,57 @@ static const char* const AL_PY_SYMBOLS[] = {{
 
 
 
-int openal_py_init(const char* libpath)
+
+static void* open_library(const char* path)
+{{
+#ifdef _WIN32
+    wchar_t wide_path[32768];
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1,
+                            wide_path, 32768))
+        return NULL;
+    return (void*)LoadLibraryW(wide_path);
+#else
+    return dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#endif
+}}
+
+static void close_library(void* handle)
+{{
+#ifdef _WIN32
+    FreeLibrary((HMODULE)handle);
+#else
+    dlclose(handle);
+#endif
+}}
+
+static void* lookup(void* handle, const char* name)
+{{
+#ifdef _WIN32
+    return (void*)GetProcAddress((HMODULE)handle, name);
+#else
+    return dlsym(handle, name);
+#endif
+}}
+
+int openal_py_init(const char* libpath, int require_devices)
 {{
     void* handle;
+    ALPyTable candidate;
+    char* path_copy;
 
     if (initialized)
         return 1;
-
-    if (libpath != NULL && libpath[0] != '\\0')
-    {{
-        handle = dlopen(libpath, RTLD_NOW | RTLD_LOCAL);
-        if (handle == NULL)
-        {{
-            fprintf(stderr, "openal_py: dlopen(\\'%s\\') failed: %s\\n", libpath, dlerror());
-            return 0;
-        }}
-        g_libpath = strdup(libpath);
-    }}
-    else
-    {{
-        /* Resolve against the bundled library the extension is linked with. */
-        handle = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
-        if (handle == NULL)
-        {{
-            fprintf(stderr, "openal_py: dlopen(NULL) failed: %s\\n", dlerror());
-            return 0;
-        }}
-        g_libpath = strdup("(bundled)");
-    }}
+    if (!libpath || !libpath[0])
+        return 0;
+    handle = open_library(libpath);
+    if (!handle)
+        return 0;
 
     for (size_t i = 0; i < sizeof(AL_PY_SYMBOLS) / sizeof(AL_PY_SYMBOLS[0]); ++i)
     {{
-        void* sym = dlsym(handle, AL_PY_SYMBOLS[i]);
-        if (sym == NULL)
+        if (!lookup(handle, AL_PY_SYMBOLS[i]))
         {{
-            fprintf(stderr, "openal_py: missing symbol: %s\\n", AL_PY_SYMBOLS[i]);
-            dlclose(handle);
+            close_library(handle);
             return 0;
         }}
     }}
@@ -310,12 +332,43 @@ int openal_py_init(const char* libpath)
     binds = []
     for c in cmds:
         argtypes = ", ".join(f"{ct}" for ct, _ in c["params"]) if c["params"] else "void"
-        binds.append(f"    fn.{c['name']} = ({c['ret']} (*)({argtypes})) dlsym(handle, \"{c['name']}\");")
+        binds.append(f"    candidate.{c['name']} = ({c['ret']} (*)({argtypes})) lookup(handle, \"{c['name']}\");")
     src += "\n".join(binds) + """
 #undef OPENAL_PY_BIND
 
+    if (require_devices)
+    {
+        ALCenum param = ALC_DEFAULT_DEVICE_SPECIFIER;
+        if (candidate.alcIsExtensionPresent(NULL, "ALC_ENUMERATE_ALL_EXT"))
+            param = 0x1013; /* ALC_ALL_DEVICES_SPECIFIER */
+        else if (candidate.alcIsExtensionPresent(NULL, "ALC_ENUMERATION_EXT"))
+            param = ALC_DEVICE_SPECIFIER;
+        const ALCchar* devices = candidate.alcGetString(NULL, param);
+        candidate.alcGetError(NULL);
+        if (!devices || !devices[0])
+        {
+            close_library(handle);
+            return 0;
+        }
+    }
+    path_copy = malloc(strlen(libpath) + 1);
+    if (!path_copy)
+    {
+        close_library(handle);
+        return 0;
+    }
+    strcpy(path_copy, libpath);
+    /* Commit only after validation; failed candidates leave no stale pointers. */
+    fn = candidate;
+    g_handle = handle;
+    g_libpath = path_copy;
     initialized = 1;
     return 1;
+}
+
+int openal_py_has_symbol(const char* name)
+{
+    return g_handle && lookup(g_handle, name) != NULL;
 }
 
 const char* openal_py_library_path(void)

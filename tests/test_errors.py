@@ -66,10 +66,11 @@ def test_listener_get_invalid_param(ctx):
         _core.listener_get(0x1234)
 
 
-def test_device_spec_invalid_device():
+def test_device_attribute_invalid_parameter(device):
+    # Invalid raw device pointers have implementation-dependent behavior.
     with pytest.raises(ALCError) as ei:
-        _core.get_device_spec(0x12345)
-    assert ei.value.code == ALC.ALC_INVALID_DEVICE
+        _core.get_integer(device.handle, 0xDEAD)
+    assert ei.value.code == ALC.ALC_INVALID_ENUM
 
 
 def test_error_cleared_after_handling(ctx):

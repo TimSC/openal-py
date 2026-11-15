@@ -38,7 +38,8 @@ cdef extern from "AL/al.h":
     ctypedef unsigned long long ALCuint64SOFT
 
 cdef extern from "_api_table.h":
-    bint openal_py_init(const char* libpath) nogil
+    bint openal_py_init(const char* libpath, bint require_devices) nogil
+    bint openal_py_has_symbol(const char* name) nogil
     const char* openal_py_library_path() nogil
 
     ctypedef void GUID

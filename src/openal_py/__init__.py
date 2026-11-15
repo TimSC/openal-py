@@ -1,8 +1,8 @@
 """Modern Python bindings for OpenAL-soft.
 
-The OpenAL implementation (libopenal) is bundled in this package.
-To use a system OpenAL library instead, set the environment variable
-``OPENAL_PY_LIBRARY`` to its path before importing.
+OpenAL is bundled by default. System OpenAL is used when the bundle is
+unavailable or detects no playback devices. To select a specific implementation,
+set ``OPENAL_PY_LIBRARY`` to its path before importing.
 
 Quick start::
 
