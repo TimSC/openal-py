@@ -8,13 +8,10 @@ Quick start::
 
     import openal_py as al
 
-    with al.Device.open() as device, device.create_context() as ctx:
-        with ctx.activate():
-            ctx.listener.position = (0.0, 1.6, 0.0)
-            sound = ctx.load("sound.wav")
-            voice = ctx.create_source(buffer=sound, gain=0.8)
-            voice.play()
-            # Keep the context alive until playback is finished.
+    with al.AudioEngine() as audio:
+        sound = audio.load("sound.wav")
+        voice = audio.play(sound, gain=0.8)
+        voice.wait()
 """
 from __future__ import annotations
 
@@ -27,11 +24,12 @@ from openal_py._core import (
 )
 from openal_py._errors import (
     OpenALError, ALLError, ALCError, LifecycleError, ResourceClosedError,
-    ContextNotCurrentError, ContextMismatchError, ResourceInUseError,
+    ContextNotCurrentError, ContextMismatchError, ResourceInUseError, ThreadAffinityError,
 )
 from openal_py._types import AudioFile, PCMData, Vector3
 from openal_py._constants import AL, ALC
 from openal_py.device import Device
+from openal_py.engine import AudioEngine, Sound, Voice
 from openal_py.context import Context
 from openal_py.listener import Listener
 from openal_py.source import Source, SourceState, SourceType
@@ -45,6 +43,10 @@ from openal_py.buffer import Buffer, AudioFormat, from_wav, from_file
 __version__ = "0.1.0"
 
 __all__ = [
+    "AudioEngine",
+    "Sound",
+    "Voice",
+    "ThreadAffinityError",
     "Parameter",
     "ParameterValue",
     "NumericKind",

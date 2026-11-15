@@ -32,6 +32,18 @@ validation; the reserved core buffer setters do not create new writable core
 parameters. Resource bindings must use object properties and routing methods,
 not raw integer setters that would bypass retention and ownership checks.
 
+## Playback facade
+
+`AudioEngine` is a synchronous convenience layer over the same objects. It owns
+its context and assets, automatically activates around calls, caches filesystem
+loads, retains voices until completion, and releases completed native sources via
+`update()`/state queries/waits. It opens and owns a default/named device or borrows
+an injected `Device`. `Sound` and `Voice` preserve access to native wrappers via
+explicit activation. Owning-thread checks raise `ThreadAffinityError` before
+native work. The `update()` and `_create_voice()` hooks permit application-level
+extensions without reproducing context/resource management. No additional native
+entry points or automatic streaming backend are introduced by the facade.
+
 ## Optional extensions
 
 | Extension family | Interface |

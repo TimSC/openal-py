@@ -51,3 +51,7 @@ class ResourceInUseError(LifecycleError):
 
 class ContextMismatchError(ValueError):
     """Resources belong to different contexts."""
+
+
+class ThreadAffinityError(LifecycleError):
+    """An engine operation was attempted outside its owning thread."""

@@ -10,6 +10,80 @@ Builds can omit the bundle and use a system installation instead.
 ## Quick start
 
 ```python
+from openal_py import AudioEngine
+
+with AudioEngine() as audio:
+    sound = audio.load("explosion.wav")
+    voice = audio.play(sound, position=(2, 0, -5), gain=0.8)
+    voice.wait()
+```
+
+`AudioEngine` owns playback resources and selects its context automatically. It
+runs synchronously on the thread that created it, with no worker thread or hidden
+event loop. `load()` returns a reusable `Sound`; `play()` returns a `Voice` and
+retains it even when the caller drops the handle. Paths and binary streams can
+also be passed directly to `play()`.
+
+Use `sound_from_pcm(data, format=..., sample_rate=...)` for generated PCM.
+Sound metadata (`duration`, `sample_rate`, `channels`, `format`, `frame_count`)
+and common voice controls (`gain`, `pitch`, `position`, `looping`, `pause()`,
+`resume()`, `stop()`) handle activation internally. `master_volume` controls the
+engine listener's gain without changing individual voice gains.
+
+Call `audio.update()` in a frame loop to reclaim completed sources. `play()`,
+`audio.voices`, playback-state queries, and `Voice.wait()` also reclaim completed
+voices. `stop()`/`close()` release a voice; start another playback with `play()`.
+Completed voices report `STOPPED`/`finished=True` even after their native source is
+released. Engine closure releases voices, sounds, context, and its owned device
+in that order. Sound and Voice also support resource blocks. Close an unused
+Sound explicitly to release its buffer; active voices must be stopped first.
+
+`wait(timeout=...)` returns `True` for completion or `False` on timeout; a timeout
+does not stop playback. Paused/looping voices require a timeout to avoid waiting
+forever on the same thread that must control them. The wait polls synchronously
+and does not pump UI events. An application's event loop should call `update()`
+and inspect `voice.finished` instead of blocking. Loopback playback advances only
+when frames are rendered; render them explicitly and call `update()`, or use a
+finite wait with an application update hook that drives rendering.
+
+`max_voices` defaults to 64. Completed voices are reaped before enforcing the
+limit; reaching it raises `ResourceInUseError` without stealing an existing voice.
+Filesystem loads are cached by resolved path and requested format until Sound or
+engine closure. Streams are never cached. `load(..., cache=False)` bypasses the
+cache to read fresh data without replacing an existing cache entry.
+
+### Extending the engine
+
+The facade deliberately reuses the existing object API:
+
+- Pass `AudioEngine(device=existing_device)` to borrow a device, including a
+  `LoopbackDevice`. The engine creates and owns a fresh context but leaves the
+  injected device open. Devices opened from names/defaults are owned and closed.
+- `with audio.activate() as ctx:` exposes the full managed context for effects,
+  listener/acoustic settings, offline rendering, and custom integrations.
+- `voice.source` and `sound.buffer` expose the underlying objects. Native calls
+  on them require activation; do not manage their lifetimes independently.
+- `sound_from_buffer(buffer)` adopts a custom-decoded buffer from this engine's
+  context, keeping asset ownership and shutdown behavior consistent.
+- Override `update()` (calling `super()`) for application scheduling/refill work.
+  Internal reclamation does not invoke this hook, so scheduling a new `play()`
+  from an update does not recursively run another application update. Wait polls
+  do invoke `update()`. Override `_create_voice(sound, source)` to configure routing before playback
+  or return a `Voice` subclass. The hook runs with the engine context current;
+  exceptions roll back the new source. Return a voice using the supplied assets.
+
+The base engine only plays static sounds; automatic streaming, voice stealing,
+and a background audio thread are left to explicit extensions. Operations on an
+engine, its sounds, and its voices must run on the creating thread; misuse raises
+`ThreadAffinityError`. Engine activations serialize cooperating engines, but raw
+OpenAL context manipulation must still be serialized by the application. Use
+resource blocks or explicit `close()` for deterministic cleanup.
+
+## Explicit OpenAL API
+
+The underlying interface remains available when direct control is preferable:
+
+```python
 import time
 from openal_py import Device, AudioFormat
 
@@ -124,6 +198,8 @@ Runnable examples live in `examples/` (also shipped inside the wheel at
 | `08_offline_rendering.py` | synchronized voices rendered to WAV without audio hardware |
 | `09_effects.py` | reverb, filters, effect sends and named parameters |
 | `10_capture.py` | microphone discovery; recording requires explicit `--record` |
+| `11_audio_engine.py` | simple playback, reusable sounds, voice controls, waiting |
+| `12_extending_engine.py` | voice factory and application update hooks |
 
 ```sh
 python examples/01_quickstart.py
