@@ -98,6 +98,16 @@ the source code and a download link.
    examples/index
    api
 
+Demos
+-----
+
+* `openal-explore <https://github.com/TimSC/openal-explore>`_: A PySide6 scene
+  editor and spatial audio demo for ``openal-py``. The player stays at the centre
+  while the world scrolls. Audio comes from stationary points or sources
+  travelling along editable polylines.
+* `python-quake2 <https://github.com/TimSC/python-quake2>`_: A port of the id
+  Software Quake II engine (version 3.21) from C to Python.
+
 Building these docs
 -------------------
 

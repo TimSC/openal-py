@@ -7,6 +7,8 @@ with a pythonic object model.
 install with `pip install openal-py` and no system OpenAL is normally needed.
 Builds can omit the bundle and use a system installation instead.
 
+[Read the documentation](https://openal-py.readthedocs.io/).
+
 ## Quick start
 
 ```python
@@ -254,6 +256,11 @@ Do not wrap one native resource under multiple owners.
 
 The wheel includes `py.typed` and native extension type stubs. Shared aliases
 `AudioFile`, `PCMData`, and `Vector3` describe file inputs, PCM buffers, and vectors.
+
+## Demos
+
+- [openal-explore](https://github.com/TimSC/openal-explore): A PySide6 scene editor and spatial audio demo for `openal-py`. The player stays at the centre while the world scrolls. Audio comes from stationary points or sources travelling along editable polylines.
+- [python-quake2](https://github.com/TimSC/python-quake2): A port of the id Software Quake II engine (version 3.21) from C to Python.
 
 ## Examples
 
