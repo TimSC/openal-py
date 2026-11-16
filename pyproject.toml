@@ -25,6 +25,7 @@ classifiers = [
 
 [project.optional-dependencies]
 test = ["pytest", "mypy"]
+docs = ["sphinx>=7", "tomli>=2; python_version < '3.11'"]
 # File loading for WAV/FLAC/OGG/MP3 and friends (Buffer.from_file)
 soundfile = ["soundfile"]
 

@@ -46,3 +46,6 @@ wheelhouse/
 *~
 .DS_Store
 Thumbs.db
+
+# Sphinx documentation output
+/docs/_build/
