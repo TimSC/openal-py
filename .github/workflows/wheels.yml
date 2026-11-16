@@ -1,0 +1,181 @@
+name: Build wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platforms to build
+        type: choice
+        default: all
+        options: [all, linux, windows, macos]
+      python:
+        description: Python versions to build
+        type: choice
+        default: all
+        options: [all, '3.11', '3.12', '3.13', '3.14', '3.15']
+      publish:
+        description: Publish successful wheels (requires Trusted Publisher setup)
+        type: choice
+        default: artifacts
+        options: [artifacts, testpypi, pypi]
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - id: matrix
+        name: Select build matrix
+        env:
+          SELECT_PLATFORM: ${{ inputs.platform }}
+          SELECT_PYTHON: ${{ inputs.python }}
+        run: |
+          python - <<'PY'
+          import json, os
+          platforms = [
+              ('linux', 'ubuntu-24.04', 'x64'),
+              ('windows', 'windows-2022', 'x64'),
+              ('macos', 'macos-15', 'arm64'),
+              ('macos', 'macos-15-intel', 'x64'),
+          ]
+          versions = ['3.11', '3.12', '3.13', '3.14', '3.15']
+          matrix = {'include': [
+              {'platform': platform, 'runner': runner, 'arch': arch, 'python': version}
+              for platform, runner, arch in platforms
+              for version in versions
+              if os.environ['SELECT_PLATFORM'] in ('all', platform)
+              and os.environ['SELECT_PYTHON'] in ('all', version)
+          ]}
+          assert matrix['include'], 'No builds selected'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps(matrix) + '\n')
+          PY
+
+  build:
+    name: ${{ matrix.platform }}-${{ matrix.arch }} / Python ${{ matrix.python }}
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      PYTHON_VERSION: ${{ matrix.python }}
+      ALSOFT_DRIVERS: 'null'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          architecture: ${{ matrix.arch }}
+          allow-prereleases: true
+
+      - name: Build Linux wheel
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          tag="cp${PYTHON_VERSION//./}"
+          # A single explicitly requested interpreter: the script fails if absent.
+          bash tools/build_manylinux_wheels.sh --python-tags "$tag-$tag" --jobs 2
+
+      - name: Download verified Windows OpenAL Soft binaries
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'openal-soft-1.25.2-bin.zip'
+          Invoke-WebRequest -Uri 'https://github.com/kcat/openal-soft/releases/download/1.25.2/openal-soft-1.25.2-bin.zip' -OutFile $archive
+          $expected = '67a0c4b800bd860c93c04f38caf8cbe4875f9c84700ac430efc451f70e265434'
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+            throw 'OpenAL Soft archive checksum mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath "$env:RUNNER_TEMP/openal-binaries"
+
+      - name: Build Windows wheel using prebuilt OpenAL
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          # Ensure the script's launcher selects the setup-python interpreter.
+          py "-$env:PYTHON_VERSION-64" -c "import sys; assert sys.executable.lower() == r'$env:pythonLocation\python.exe'.lower(), sys.executable"
+          if ($LASTEXITCODE -ne 0) { throw 'Python launcher did not select the requested interpreter' }
+          ./tools/build_windows_wheels.ps1 -PythonVersions @($env:PYTHON_VERSION) -OpenAlBinaryDistribution "$env:RUNNER_TEMP/openal-binaries/openal-soft-1.25.2-bin"
+
+      - name: Build and repair macOS wheel
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          # Build each architecture natively; keep Python and OpenAL targets aligned.
+          MACOSX_DEPLOYMENT_TARGET: '15.0'
+        run: |
+          python -m pip install --upgrade pip build delocate
+          cmake -S openal-soft -B openal-soft/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET" \
+            -DCMAKE_OSX_ARCHITECTURES="$(uname -m)" \
+            -DBUILD_SHARED_LIBS=ON \
+            -DALSOFT_OSX_FRAMEWORK=OFF \
+            -DALSOFT_EXAMPLES=OFF -DALSOFT_UTILS=OFF -DALSOFT_TESTS=OFF \
+            -DALSOFT_REQUIRE_COREAUDIO=ON
+          cmake --build openal-soft/build --parallel 3
+          python -m build --wheel --outdir raw-wheels
+          delocate-wheel --require-archs "$(uname -m)" --wheel-dir wheelhouse raw-wheels/*.whl
+
+      - name: Collect and install the wheel
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os, shutil, subprocess, sys
+          wheels = list(Path('wheelhouse').rglob('*.whl'))
+          assert len(wheels) == 1, f'Expected one wheel, found {wheels}'
+          tag = 'cp' + os.environ['PYTHON_VERSION'].replace('.', '')
+          assert f'-{tag}-{tag}-' in wheels[0].name, wheels[0].name
+          output = Path('wheel-output')
+          output.mkdir()
+          wheel = output / wheels[0].name
+          shutil.copy2(wheels[0], wheel)
+          subprocess.run([sys.executable, '-m', 'pip', 'install', str(wheel)], check=True)
+          PY
+          python -m pip check
+          python tools/wheel_smoke_test.py
+          python -m pip install twine
+          python -m twine check wheel-output/*.whl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform }}-${{ matrix.arch }}-cp${{ matrix.python }}
+          path: wheel-output/*.whl
+          if-no-files-found: error
+
+  publish:
+    name: Publish to ${{ inputs.publish }}
+    needs: build
+    if: inputs.publish != 'artifacts'
+    runs-on: ubuntu-24.04
+    environment:
+      name: ${{ inputs.publish }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - name: Publish to TestPyPI
+        if: inputs.publish == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+      - name: Publish to PyPI
+        if: inputs.publish == 'pypi'
+        uses: pypa/gh-action-pypi-publish@release/v1

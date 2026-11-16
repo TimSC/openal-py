@@ -576,3 +576,41 @@ wheel_run="wheelhouse/the-directory-printed-by-the-build"
 python3 -m twine check "$wheel_run"/*.whl
 python3 -m twine upload "$wheel_run"/*.whl
 ```
+
+### GitHub Actions builds and publishing
+
+Commit `.github/workflows/wheels.yml` and `tools/wheel_smoke_test.py` along with
+any build-script or package changes they depend on. Push the workflow to the
+repository's default branch, then open **Actions → Build wheels → Run workflow**.
+Choose a platform and Python version, or `all` for Python 3.11–3.15 across Linux
+x86_64, Windows x64, and macOS Apple Silicon and Intel. A full run starts 20 build
+jobs. An unavailable requested Python version fails its job rather than silently
+omitting a wheel. macOS wheels currently target macOS 15 or newer.
+
+The default `artifacts` selection only builds and tests wheels. Download the
+`wheels-*` artifacts from the completed run. Windows bundles the checksum-verified
+OpenAL Soft 1.25.2 binary release; Linux and macOS compile the submodule. Each job
+installs its wheel and checks bundled-library loading, loopback playback, and
+streaming completion before uploading an artifact. These are smoke tests, not a
+replacement for running the full project test suite.
+
+To enable publishing, create GitHub repository environments named `pypi` and/or
+`testpypi`. Configure required reviewers for `pypi` if available. In the corresponding
+[PyPI](https://pypi.org/manage/account/publishing/) or
+[TestPyPI](https://test.pypi.org/manage/account/publishing/) publishing settings,
+add a GitHub Trusted Publisher:
+
+| Field | Value |
+| --- | --- |
+| Owner | `TimSC` |
+| Repository | `openal-py` |
+| Workflow filename | `wheels.yml` |
+| Environment | `pypi` or `testpypi`, matching the selected service |
+
+For an existing project, add the publisher in that project's publishing settings;
+for a new project, register a pending publisher through your account. No API token
+is needed. Choose `testpypi` or `pypi` when starting a run to publish the selected
+wheels only after every selected build passes. There is no automatic publication
+on pushes or tags. Already-published wheel filenames cannot be replaced; update
+the project version before publishing a new release. This workflow publishes
+wheels only, not a source distribution.
