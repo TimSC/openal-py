@@ -72,7 +72,7 @@ The facade deliberately reuses the existing object API:
   or return a `Voice` subclass. The hook runs with the engine context current;
   exceptions roll back the new source. Return a voice using the supplied assets.
 
-The base engine only plays static sounds; automatic streaming, voice stealing,
+The engine plays static sounds and streams refilled by `update()`. Voice stealing
 and a background audio thread are left to explicit extensions. Operations on an
 engine, its sounds, and its voices must run on the creating thread; misuse raises
 `ThreadAffinityError`. Engine activations serialize cooperating engines, but raw
@@ -215,7 +215,35 @@ opened by the helper are owned; caller-provided decoders are borrowed unless
 `close_decoder=True`. Caller binary streams remain open. `stream.source` exposes
 position, gain and effect controls; leave its queue, looping and lifetime to the
 helper. Looping rewinds the decoder rather than enabling native source looping.
-The helper is independent of `AudioEngine` and its static voice reclamation.
+`AudioEngine.play_stream()` manages this helper for you:
+
+```python
+import time
+from openal_py import AudioEngine, SoundFileStream
+
+with AudioEngine() as audio, SoundFileStream("music.flac") as stream:
+    with audio.play_stream(stream) as voice:
+        while voice.active:
+            audio.update()
+            time.sleep(0.01)
+```
+
+Subclass `PCMStream` to supply procedural audio, microphone input, or queued
+network audio. Implement fixed `format` and `sample_rate` properties and
+`read_frames(count)`, returning at most `count` complete, interleaved native-endian
+PCM frames. `b""` means permanent EOF; `None` means temporarily unavailable.
+Short reads are supported. Reads must return promptly because they run on the
+engine's owning thread; use a bounded producer queue for blocking inputs.
+`PCMDecoder` also accepts objects implementing this interface without inheritance.
+`SoundFileStream` is the stream-oriented name for `SoundFileDecoder`.
+
+Streaming voices share `max_voices` with static voices and expose `pause()`,
+`resume()`, `stop()`/`close()`, `state`, `error`, and `underrun_count`. `active`
+remains true while paused or waiting for data. Call `audio.update()` regularly to
+refill and reclaim them; there is no background worker. Inputs are borrowed by
+default. Set `close_stream=True` to transfer cleanup responsibility after successful
+startup. An engine closes transferred inputs on completion, stop, or shutdown.
+Seeking and looping remain optional decoder capabilities on `StreamingSource`.
 
 For external native resources, use `Device.from_handle`, `Context.from_handle`,
 `Source.from_handle`, or `Buffer.from_handle` with explicit context/device ownership.
@@ -247,6 +275,8 @@ Runnable examples live in `examples/` (also shipped inside the wheel at
 | `11_audio_engine.py` | simple playback, reusable sounds, voice controls, waiting |
 | `12_extending_engine.py` | voice factory and application update hooks |
 | `13_streaming_helper.py` | bounded streaming, pause/resume and loopback recovery |
+| `14_engine_streaming.py` | custom PCM stream and engine-managed buffer refilling |
+| `15_soundfile_pcm_stream.py` | wrap an already-open SoundFile as a borrowed PCM stream |
 
 ```sh
 python examples/01_quickstart.py

@@ -1,6 +1,7 @@
 """Explicit, creating-thread streaming with a bounded reusable buffer pool."""
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from enum import Enum
 import operator
 import threading
@@ -15,7 +16,7 @@ from openal_py.source import Source, SourceState
 
 
 class PCMDecoder(Protocol):
-    """Fixed-layout native-endian PCM decoder; an empty read means final EOF.
+    """Fixed-layout native-endian PCM decoder; empty means EOF, None means wait.
 
     read_frames must return complete frames, at most the requested count. An
     optional rewind() method enables looping. Caller decoders are borrowed by
@@ -28,12 +29,41 @@ class PCMDecoder(Protocol):
     @property
     def sample_rate(self) -> int: ...
 
-    def read_frames(self, frames: int) -> PCMData: ...
+    def read_frames(self, frames: int) -> PCMData | None: ...
 
     def close(self) -> None: ...
 
 
-class SoundFileDecoder:
+class PCMStream(ABC):
+    """Fixed-format PCM input. Reads must return promptly on the caller's thread.
+
+    Return at most the requested complete, interleaved native-endian frames.
+    None means temporarily unavailable; empty bytes mean permanent EOF.
+    Format and sample rate must remain fixed throughout playback.
+    """
+
+    @property
+    @abstractmethod
+    def format(self) -> AudioFormat: ...
+
+    @property
+    @abstractmethod
+    def sample_rate(self) -> int: ...
+
+    @abstractmethod
+    def read_frames(self, frames: int) -> PCMData | None: ...
+
+    def close(self) -> None:
+        """Release owned input resources; the default does nothing."""
+
+    def __enter__(self) -> PCMStream:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+
+class SoundFileDecoder(PCMStream):
     """Optional SoundFile adapter, preserving channels unless mono=True.
 
     Closing the adapter releases the decoder, never a caller-owned binary stream.
@@ -47,15 +77,23 @@ class SoundFileDecoder:
             channels = self._reader.channels
             _infer_format(channels)
             output_channels = 1 if mono else channels
-            self.format = _infer_format(output_channels) if format is None else AudioFormat(format)
+            self._format = _infer_format(output_channels) if format is None else AudioFormat(format)
             if self.format.channels != output_channels:
                 raise ValueError(f'file has {output_channels} channel(s), format expects {self.format.channels}')
-            self.sample_rate = int(self._reader.samplerate)
+            self._sample_rate = int(self._reader.samplerate)
             self._floating = self._reader.subtype in ('FLOAT', 'DOUBLE')
             self._mono = mono and channels == 2
         except BaseException:
             self._reader.close()
             raise
+
+    @property
+    def format(self) -> AudioFormat:
+        return self._format
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
 
     def read_frames(self, frames: int) -> bytes:
         count = operator.index(frames)
@@ -206,13 +244,16 @@ class StreamingSource:
         return max(0.0, sum(buffer.frame_count for buffer in self._queued) / self._rate
                    - self.source.offset_seconds)
 
-    def _read_chunk(self) -> bytes:
+    def _read_chunk(self) -> bytes | None:
         result = bytearray()
         frame_size = self._format.bytes_per_frame
         rewound_empty = False
         while len(result) < self.chunk_frames * frame_size:
             remaining = self.chunk_frames - len(result) // frame_size
-            data = memoryview(self.decoder.read_frames(remaining)).tobytes()
+            read = self.decoder.read_frames(remaining)
+            if read is None:
+                return bytes(result) if result else None
+            data = memoryview(read).tobytes()
             if len(data) % frame_size or len(data) > remaining * frame_size:
                 raise ValueError('decoder returned an invalid PCM frame count')
             if data:
@@ -268,6 +309,8 @@ class StreamingSource:
             pending: list[Buffer] = []
             while self._free and not self._eof:
                 pcm = self._read_chunk()
+                if pcm is None:
+                    break
                 if pcm:
                     buffer = self._free.pop()
                     buffer.upload_pcm(pcm, self._format, self._rate)
@@ -344,3 +387,7 @@ class StreamingSource:
 
     def __exit__(self, *_exc: object) -> None:
         self.close()
+
+
+# Stream-oriented spelling for the SoundFile PCM adapter.
+SoundFileStream = SoundFileDecoder

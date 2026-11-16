@@ -16,6 +16,7 @@ from openal_py.context import Context
 from openal_py.device import Device
 from openal_py.loopback import LoopbackDevice
 from openal_py.source import Source, SourceState
+from openal_py.streaming import PCMDecoder, StreamingSource, StreamState
 from openal_py._errors import (
     ContextMismatchError, LifecycleError, ResourceClosedError, ResourceInUseError,
     ThreadAffinityError,
@@ -39,6 +40,7 @@ class _EngineState:
         self.owns_device = owns_device
         self.sources: set[Source] = set()
         self.buffers: set[Buffer] = set()
+        self.streams: set[StreamingSource] = set()
 
     def close(self) -> None:
         # Continue teardown on failure; context destruction also frees any native
@@ -46,7 +48,7 @@ class _EngineState:
         # for retry if context/device cleanup fails.
         errors: list[Exception] = []
         with _activation_lock:
-            resources: list[Source | Buffer | Context] = [*self.sources, *self.buffers, self.context]
+            resources: list[Source | Buffer | Context | StreamingSource] = [*self.streams, *self.sources, *self.buffers, self.context]
             for resource in resources:
                 try:
                     resource.close()
@@ -55,6 +57,7 @@ class _EngineState:
             if self.context.closed:
                 self.sources.clear()
                 self.buffers.clear()
+                self.streams = {stream for stream in self.streams if stream._owns_decoder}
             if self.owns_device:
                 try:
                     self.device.close()
@@ -72,7 +75,7 @@ def _finite_nonnegative(value: float, name: str, *, positive: bool = False) -> f
 
 
 class AudioEngine:
-    """An owning-thread playback facade; no worker thread or automatic streaming.
+    """An owning-thread playback facade; update() pumps streams without a worker.
 
     Named/default devices are owned. An injected Device (including LoopbackDevice)
     is borrowed; the engine owns only its newly created context and assets.
@@ -90,6 +93,7 @@ class AudioEngine:
         self._thread = threading.current_thread()
         self._max_voices = limit
         self._voices: set[Voice] = set()
+        self._streams: set[StreamingVoice] = set()
         self._sounds: set[Sound] = set()
         self._cache: dict[tuple[str, int | None, bool], Sound] = {}
         self._entered = False
@@ -224,7 +228,7 @@ class AudioEngine:
             if sound.closed:
                 raise ResourceClosedError('sound has been closed')
         self._reap_finished()
-        if len(self._voices) >= self.max_voices:
+        if len(self._voices) + len(self._streams) >= self.max_voices:
             raise ResourceInUseError('maximum simultaneous voices reached')
         asset = sound if isinstance(sound, Sound) else self.load(sound)
         with self.activate() as context:
@@ -244,6 +248,34 @@ class AudioEngine:
                 raise
             return voice
 
+    def play_stream(self, stream: PCMDecoder, *, chunk_frames: int = 8192,
+                    queue_depth: int = 4, close_stream: bool = False,
+                    gain: float = 1.0, pitch: float = 1.0) -> StreamingVoice:
+        """Play borrowed PCM input; update() refills it on the owning thread.
+
+        close_stream transfers input cleanup to the engine after successful
+        construction. The input must return promptly; None means no data yet.
+        """
+        self._require_open()
+        self._reap_finished()
+        if len(self._voices) + len(self._streams) >= self.max_voices:
+            raise ResourceInUseError('maximum simultaneous voices reached')
+        with self.activate() as context:
+            playback = StreamingSource(context, stream, chunk_frames=chunk_frames,
+                                       queue_depth=queue_depth)
+            try:
+                playback.source.gain = gain
+                playback.source.pitch = pitch
+                playback.play()
+            except BaseException:
+                playback.close()
+                raise
+            playback._owns_decoder = close_stream
+            voice = StreamingVoice(self, playback)
+            self._state.streams.add(playback)
+            self._streams.add(voice)
+            return voice
+
     def _create_voice(self, sound: Sound, source: Source) -> Voice:
         """Subclass hook, called with the engine context current before playback.
 
@@ -253,10 +285,10 @@ class AudioEngine:
         return Voice(self, sound, source)
 
     @property
-    def voices(self) -> tuple[Voice, ...]:
+    def voices(self) -> tuple[Voice | StreamingVoice, ...]:
         """Current live voices after reclaiming completed playback."""
         self._reap_finished()
-        return tuple(self._voices)
+        return (*self._voices, *self._streams)
 
     def _release_voice(self, voice: Voice) -> None:
         voice._source.close()
@@ -267,14 +299,28 @@ class AudioEngine:
     def update(self) -> int:
         """Reclaim completed voices; return their count. Call from a frame loop.
 
-        Subclasses can extend this method (calling super()) for their own
-        streaming/refill policies. The base engine only manages static sounds.
+        Streaming voices refill here; input reads must return promptly.
         """
+        with self.activate():
+            for voice in tuple(self._streams):
+                try:
+                    voice._playback.update()
+                except Exception as error:
+                    try:
+                        voice.close()
+                    except Exception as cleanup_error:
+                        raise error from cleanup_error
+                    raise
         return self._reap_finished()
 
     def _reap_finished(self) -> int:
         released = 0
         with self.activate():
+            for stream_voice in tuple(self._streams):
+                if stream_voice._playback.closed or stream_voice._playback.state in (
+                        StreamState.FINISHED, StreamState.ERROR, StreamState.STOPPED):
+                    stream_voice.close()
+                    released += 1
             for voice in tuple(self._voices):
                 if voice._source.closed or voice._source.state is SourceState.STOPPED:
                     self._release_voice(voice)
@@ -283,6 +329,8 @@ class AudioEngine:
 
     def stop_all(self) -> None:
         with self.activate():
+            for stream_voice in tuple(self._streams):
+                stream_voice.close()
             for voice in tuple(self._voices):
                 self._release_voice(voice)
 
@@ -295,9 +343,10 @@ class AudioEngine:
                 for voice in self._voices:
                     voice._finished = True
                 self._voices.clear()
+                self._streams.clear()
                 self._sounds.clear()
                 self._cache.clear()
-                if not self._state.owns_device or self._state.device.closed:
+                if not self._state.streams and (not self._state.owns_device or self._state.device.closed):
                     self._finalizer.detach()
 
     def __enter__(self: _E) -> _E:
@@ -538,3 +587,71 @@ class Voice:
 
     def __repr__(self) -> str:
         return f'Voice(closed={self.closed}, finished={self._finished})'
+
+
+class StreamingVoice:
+    """Engine-managed streaming playback. Inputs are borrowed unless transferred.
+
+    active remains true while waiting for input or paused. Source access is
+    advanced: use engine.activate() and leave queue management to this voice.
+    """
+
+    def __init__(self, engine: AudioEngine, playback: StreamingSource):
+        self._engine = engine
+        self._playback = playback
+        self._terminal_state = StreamState.CLOSED
+
+    @property
+    def closed(self) -> bool:
+        return self._playback.closed
+
+    @property
+    def active(self) -> bool:
+        self._engine._check_thread()
+        return not self.closed and self._playback.state not in (
+            StreamState.FINISHED, StreamState.STOPPED, StreamState.ERROR)
+
+    @property
+    def state(self) -> StreamState:
+        self._engine._check_thread()
+        return self._terminal_state if self.closed else self._playback.state
+
+    @property
+    def error(self) -> Exception | None:
+        return self._playback.error
+
+    @property
+    def underrun_count(self) -> int:
+        return self._playback.underrun_count
+
+    @property
+    def source(self) -> Source:
+        self._engine._require_open()
+        if self.closed:
+            raise ResourceClosedError('streaming voice has been closed')
+        return self._playback.source
+
+    def pause(self) -> None:
+        with self._engine.activate():
+            self._playback.pause()
+
+    def resume(self) -> None:
+        with self._engine.activate():
+            self._playback.resume()
+
+    def close(self) -> None:
+        self._engine._check_thread()
+        if self._playback.state in (StreamState.FINISHED, StreamState.ERROR):
+            self._terminal_state = self._playback.state
+        self._playback.close()
+        self._engine._state.streams.discard(self._playback)
+        self._engine._streams.discard(self)
+
+    stop = close
+
+    def __enter__(self) -> StreamingVoice:
+        self._engine._require_open()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
