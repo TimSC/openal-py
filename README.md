@@ -115,7 +115,16 @@ buffers also support resource blocks and expose their owning `context`.
 Close contexts before their device; closing a device with live managed contexts
 raises `ResourceInUseError`. Source and buffer cleanup temporarily activates their
 context and restores the previous one, even when called outside an activation
-block. Native deletion failures retain the handle for retry.
+block. Native deletion failures retain the handle for retry. If clearing the
+current context fails, `Context.close()` raises `LifecycleError` and leaves the
+context and its finalizer armed; it does not destroy the still-current context.
+`AudioEngine.close()` also retains ownership when this happens, so cleanup can
+be retried after the activation failure is resolved.
+
+Use resource blocks or `try`/`finally` on the creating thread to stop playback
+and close native resources before exiting. Garbage-collection/interpreter-exit
+finalizers are a best-effort fallback. Forced termination such as `os._exit()`
+bypasses Python cleanup; the binding does not intercept process-exit functions.
 
 `ctx.listener` is bound to `ctx`; `Listener()` binds to the current managed
 context at construction. Positions, velocities, and directions accept arbitrary

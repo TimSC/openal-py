@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 import weakref
 
 from openal_py import _core
-from openal_py._errors import ResourceClosedError
+from openal_py._errors import LifecycleError, ResourceClosedError
 
 if TYPE_CHECKING:
     from openal_py.device import Device
@@ -57,7 +57,10 @@ class ContextState:
         if self.handle is not None:
             if self.owned:
                 if _core.get_current_context() == self.handle:
-                    _core.make_context_current(None)
+                    if not _core.make_context_current(None):
+                        # Keep ownership and the finalizer armed for retry;
+                        # destroying a still-current context is unsafe.
+                        raise LifecycleError("could not detach context before destruction")
                 _core.destroy_context(self.handle)
             self.handle = None
 
